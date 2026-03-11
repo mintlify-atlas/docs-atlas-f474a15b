@@ -1,0 +1,499 @@
+---
+title: Module Structure
+description: Deep dive into the organization of each module
+---
+
+Each module in the project follows a consistent package structure that makes the codebase easy to navigate and understand.
+
+## Core Module Structure
+
+The **core** module contains pure business logic organized by domain:
+
+```
+core/src/main/java/com/fbaron/ims/
+├── product/
+│   ├── model/
+│   │   └── Product.java
+│   ├── usecase/
+│   │   ├── RegisterProductUseCase.java
+│   │   └── GetProductUseCase.java
+│   ├── repository/
+│   │   ├── ProductCommandRepository.java
+│   │   └── ProductQueryRepository.java
+│   ├── service/
+│   │   └── ProductService.java
+│   └── exception/
+│       └── ProductNotFoundException.java
+└── inventory/
+    ├── model/
+    │   ├── InventoryMovement.java
+    │   └── MovementType.java
+    ├── usecase/
+    │   ├── RegisterMovementUseCase.java
+    │   └── GetMovementUseCase.java
+    ├── repository/
+    │   ├── InventoryMovementCommandRepository.java
+    │   └── InventoryMovementQueryRepository.java
+    ├── service/
+    │   └── InventoryMovementService.java
+    └── exception/
+        ├── InsufficientStockException.java
+        └── InvalidMovementQuantityException.java
+```
+
+### Package Breakdown
+
+<Tabs>
+  <Tab title="model/">
+    **Domain models** representing core business entities:
+    
+    ```java Product.java
+    package com.fbaron.ims.product.model;
+    
+    @Getter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public class Product {
+        private UUID id;
+        private String name;
+        private String description;
+        private BigDecimal price;
+        private String category;
+    }
+    ```
+    
+    <Info>
+      Models are **pure POJOs** with no annotations except Lombok. They represent business concepts, not database tables.
+    </Info>
+  </Tab>
+  
+  <Tab title="usecase/">
+    **Use case interfaces** defining what the system can do:
+    
+    ```java RegisterProductUseCase.java
+    public interface RegisterProductUseCase {
+        Product register(Product product);
+    }
+    ```
+    
+    ```java GetProductUseCase.java
+    public interface GetProductUseCase {
+        Product getById(UUID id);
+        List<Product> getAll();
+    }
+    ```
+    
+    These are the **primary ports** that external systems (like REST APIs) use.
+  </Tab>
+  
+  <Tab title="repository/">
+    **Repository ports** defining data access needs:
+    
+    <CodeGroup>
+    ```java ProductCommandRepository.java
+    /**
+     * Specialized Port for creating, updating, and deleting data operations.
+     */
+    public interface ProductCommandRepository {
+        Product save(Product product);
+    }
+    ```
+    
+    ```java ProductQueryRepository.java
+    /**
+     * Specialized Port for read-only operations.
+     */
+    public interface ProductQueryRepository {
+        List<Product> findAll();
+        Optional<Product> findById(UUID id);
+    }
+    ```
+    </CodeGroup>
+    
+    <Note>
+      CQRS-inspired separation: Commands (write) and Queries (read) are different interfaces.
+    </Note>
+  </Tab>
+  
+  <Tab title="service/">
+    **Service implementations** orchestrating business logic:
+    
+    ```java ProductService.java
+    @RequiredArgsConstructor
+    public class ProductService implements RegisterProductUseCase, GetProductUseCase {
+    
+        private final ProductQueryRepository productQueryRepository;
+        private final ProductCommandRepository productCommandRepository;
+    
+        @Override
+        public Product register(Product product) {
+            return productCommandRepository.save(product);
+        }
+    
+        @Override
+        public List<Product> getAll() {
+            return productQueryRepository.findAll();
+        }
+    
+        @Override
+        public Product getById(UUID id) {
+            return productQueryRepository.findById(id)
+                    .orElseThrow(() -> new ProductNotFoundException(id));
+        }
+    }
+    ```
+    
+    <Warning>
+      Services are **NOT** Spring `@Component` or `@Service` beans. They're plain Java classes registered via `@Bean` configuration.
+    </Warning>
+  </Tab>
+  
+  <Tab title="exception/">
+    **Domain exceptions** for business rule violations:
+    
+    ```java ProductNotFoundException.java
+    public class ProductNotFoundException extends RuntimeException {
+        public ProductNotFoundException(UUID productId) {
+            super("Product not found with ID: " + productId);
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Data Module Structure
+
+The **data** module organizes adapters by technology and domain:
+
+```
+data/src/main/java/com/fbaron/ims/
+├── config/
+│   └── InventoryBeanConfig.java
+├── product/
+│   ├── jpa/
+│   │   ├── ProductJpaAdapter.java
+│   │   ├── entity/
+│   │   │   └── ProductJpaEntity.java
+│   │   ├── mapper/
+│   │   │   └── ProductJpaMapper.java
+│   │   └── repository/
+│   │       └── ProductJpaRepository.java
+│   ├── jdbc/
+│   │   ├── ProductJdbcAdapter.java
+│   │   ├── entity/ ...
+│   ├── mongo/
+│   │   ├── ProductMongoAdapter.java
+│   │   ├── entity/ ...
+│   └── elasticsearch/
+│       ├── ProductElasticsearchAdapter.java
+│       ├── entity/ ...
+└── inventory/
+    ├── jpa/ ...
+    ├── jdbc/ ...
+    ├── mongo/ ...
+    └── elasticsearch/ ...
+```
+
+### Adapter Package Pattern
+
+Each adapter follows the same structure:
+
+<Steps>
+  <Step title="Adapter Class">
+    Implements repository ports from core:
+    
+    ```java InventoryMovementJpaAdapter.java
+    @Component
+    @ConditionalOnProperty(name = "app.persistence.type", havingValue = "jpa", matchIfMissing = true)
+    @RequiredArgsConstructor
+    public class InventoryMovementJpaAdapter implements
+            InventoryMovementQueryRepository,
+            InventoryMovementCommandRepository {
+        
+        private final InventoryMovementJpaRepository jpaRepository;
+        private final InventoryMovementJpaMapper jpaMapper;
+        
+        @Override
+        public InventoryMovement save(InventoryMovement inventoryMovement) {
+            var jpaEntity = jpaMapper.toJpaEntity(inventoryMovement);
+            return jpaMapper.toModel(jpaRepository.save(jpaEntity));
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Entity Classes">
+    Technology-specific persistence models:
+    
+    ```java InventoryMovementJpaEntity.java
+    @Entity
+    @Table(name = "inventory_movements")
+    public class InventoryMovementJpaEntity {
+        @Id
+        private UUID id;
+        
+        @ManyToOne
+        @JoinColumn(name = "product_id")
+        private ProductJpaEntity product;
+        
+        private Integer quantity;
+        
+        @Enumerated(EnumType.STRING)
+        private MovementType type;
+        
+        // ...
+    }
+    ```
+  </Step>
+  
+  <Step title="Mapper Interface">
+    MapStruct interface for converting between domain models and entities:
+    
+    ```java InventoryMovementJpaMapper.java
+    @Mapper(componentModel = "spring")
+    public interface InventoryMovementJpaMapper {
+        InventoryMovementJpaEntity toJpaEntity(InventoryMovement model);
+        InventoryMovement toModel(InventoryMovementJpaEntity entity);
+    }
+    ```
+  </Step>
+  
+  <Step title="Spring Data Repository">
+    Extends Spring Data interface:
+    
+    ```java InventoryMovementJpaRepository.java
+    public interface InventoryMovementJpaRepository 
+            extends JpaRepository<InventoryMovementJpaEntity, UUID> {
+        
+        @Query("SELECT COALESCE(SUM(im.quantity), 0) FROM InventoryMovementJpaEntity im " +
+               "WHERE im.product.id = :productId AND im.type = 'INBOUND'")
+        Integer findTotalInputs(@Param("productId") UUID productId);
+    }
+    ```
+  </Step>
+</Steps>
+
+## Web Module Structure
+
+The **web** module provides REST API adapters:
+
+```
+web/src/main/java/com/fbaron/ims/
+├── exception/
+│   └── GlobalExceptionHandler.java
+├── product/
+│   ├── dto/
+│   │   ├── ProductDto.java
+│   │   └── RegisterProductDto.java
+│   ├── mapper/
+│   │   └── ProductDtoMapper.java
+│   └── rest/
+│       └── ProductRestAdapter.java
+└── inventory/
+    ├── dto/
+    │   ├── InventoryMovementDto.java
+    │   └── RegisterInventoryMovementDto.java
+    ├── mapper/
+    │   └── InventoryMovementDtoMapper.java
+    └── rest/
+        └── InventoryRestAdapter.java
+```
+
+<Tabs>
+  <Tab title="rest/">
+    **REST controllers** exposing use cases:
+    
+    ```java ProductRestAdapter.java
+    @RestController
+    @RequiredArgsConstructor
+    @RequestMapping("/api/v1/products")
+    public class ProductRestAdapter {
+    
+        private final GetProductUseCase getProductUseCase;
+        private final RegisterProductUseCase registerProductUseCase;
+        private final ProductDtoMapper productDtoMapper;
+    
+        @PostMapping
+        public ResponseEntity<ProductDto> registerProduct(
+                @Valid @RequestBody RegisterProductDto dto) {
+            var product = productDtoMapper.toModel(dto);
+            var registeredProduct = registerProductUseCase.register(product);
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(productDtoMapper.toDto(registeredProduct));
+        }
+    }
+    ```
+    
+    <Note>
+      Controllers depend on **use case interfaces**, not service implementations.
+    </Note>
+  </Tab>
+  
+  <Tab title="dto/">
+    **Data Transfer Objects** for API requests/responses:
+    
+    <CodeGroup>
+    ```java RegisterProductDto.java
+    public record RegisterProductDto(
+        @NotBlank String name,
+        String description,
+        @NotNull BigDecimal price,
+        String category
+    ) {}
+    ```
+    
+    ```java ProductDto.java
+    public record ProductDto(
+        UUID id,
+        String name,
+        String description,
+        BigDecimal price,
+        String category
+    ) {}
+    ```
+    </CodeGroup>
+    
+    <Info>
+      Using Java records for immutable DTOs with built-in equals/hashCode/toString.
+    </Info>
+  </Tab>
+  
+  <Tab title="mapper/">
+    **DTO mappers** converting between DTOs and domain models:
+    
+    ```java ProductDtoMapper.java
+    @Mapper(componentModel = "spring")
+    public interface ProductDtoMapper {
+        ProductDto toDto(Product product);
+        Product toModel(RegisterProductDto dto);
+        List<ProductDto> toDto(List<Product> products);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="exception/">
+    **Global exception handler** for consistent error responses:
+    
+    ```java GlobalExceptionHandler.java
+    @RestControllerAdvice
+    public class GlobalExceptionHandler {
+        
+        @ExceptionHandler(ProductNotFoundException.class)
+        public ResponseEntity<ErrorResponse> handleProductNotFound(
+                ProductNotFoundException ex) {
+            return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(new ErrorResponse(ex.getMessage()));
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## app-main Module Structure
+
+The **app-main** module bootstraps the application:
+
+```
+app-main/
+├── src/main/java/com/fbaron/ims/
+│   └── InventoryApplication.java
+└── src/main/resources/
+    ├── application.yaml
+    ├── application-develop.yaml
+    ├── application-release.yaml
+    ├── application-prod.yaml
+    └── data.sql
+```
+
+<Tabs>
+  <Tab title="InventoryApplication.java">
+    ```java
+    @SpringBootApplication
+    @ComponentScan(basePackages = "com.fbaron.ims")
+    public class InventoryApplication {
+        public static void main(String[] args) {
+            SpringApplication.run(InventoryApplication.class, args);
+        }
+    }
+    ```
+    
+    <Info>
+      The `@ComponentScan` ensures Spring finds components across all modules.
+    </Info>
+  </Tab>
+  
+  <Tab title="application.yaml">
+    Base configuration with environment variable substitution:
+    
+    ```yaml
+    app:
+      persistence:
+        type: ${APP_PERSISTENCE_TYPE:jpa}
+    
+    spring:
+      datasource:
+        url: ${DATABASE_URL:jdbc:h2:mem:inventorydb}
+        driver-class-name: ${DATABASE_DRIVER:org.h2.Driver}
+        username: ${DATABASE_USERNAME:sa}
+        password: ${DATABASE_PASSWORD:}
+    ```
+  </Tab>
+</Tabs>
+
+## Key Design Patterns
+
+<AccordionGroup>
+  <Accordion title="Package by Feature">
+    Organized by business domain (product, inventory) rather than technical layers:
+    
+    **Good (Package by Feature):**
+    ```
+    ├── product/
+    │   ├── model/
+    │   ├── usecase/
+    │   ├── service/
+    │   └── repository/
+    └── inventory/
+    ```
+    
+    **Bad (Package by Layer):**
+    ```
+    ├── model/
+    │   ├── Product.java
+    │   └── InventoryMovement.java
+    ├── service/
+    ├── repository/
+    ```
+  </Accordion>
+  
+  <Accordion title="Separation of Concerns">
+    Each package has a single responsibility:
+    - **model/** - Business entities only
+    - **usecase/** - Interface definitions
+    - **service/** - Business logic implementations
+    - **repository/** - Data access contracts
+  </Accordion>
+  
+  <Accordion title="Technology Isolation">
+    Adapters are grouped by technology (jpa, jdbc, mongo, elasticsearch), making it easy to add/remove persistence strategies.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Ports and Adapters" icon="plug" href="/architecture/ports-and-adapters">
+    Detailed guide to all interfaces and implementations
+  </Card>
+  <Card title="Adding Features" icon="plus" href="/guides/adding-features">
+    Learn how to add new domains or use cases
+  </Card>
+  <Card title="Persistence Adapters" icon="database" href="/guides/persistence-adapters">
+    Understand each persistence technology
+  </Card>
+  <Card title="Testing Strategies" icon="vial" href="/guides/testing-strategies">
+    Write tests for each module type
+  </Card>
+</CardGroup>

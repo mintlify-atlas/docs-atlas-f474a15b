@@ -1,80 +1,229 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get the Modular Hexagonal Inventory System running in 5 minutes
 ---
 
-## Get started in three steps
+Get the inventory system up and running quickly with this step-by-step guide.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+<Warning>
+  **Java 21 is required.** This project uses Java 21 language features and will not compile with earlier versions.
+</Warning>
+
+Ensure you have the following installed:
+
+- **JDK 21** or higher
+- **Git** for cloning the repository
+- (Optional) **Docker** for running PostgreSQL, MySQL, MongoDB, or Elasticsearch
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone https://github.com/ferneybaron/inventory-app-multi-module-hexagonal.git
+    cd inventory-app-multi-module-hexagonal
+    ```
+  </Step>
+
+  <Step title="Run with Default Configuration">
+    The application runs with H2 in-memory database and JPA adapter by default:
+    
+    <Tabs>
+      <Tab title="Linux / macOS">
+        ```bash
+        ./gradlew :app-main:bootRun
+        ```
+      </Tab>
+      <Tab title="Windows">
+        ```bash
+        .\gradlew.bat :app-main:bootRun
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Access the Application">
+    The application starts on port 8080:
+    
+    - **Base URL:** `http://localhost:8080`
+    - **H2 Console:** `http://localhost:8080/h2-console` (if enabled)
+    - **API Docs:** `http://localhost:8080/swagger-ui.html`
+  </Step>
+</Steps>
+
+## Test the API
+
+Once the application is running, test it with these examples:
+
+<CodeGroup>
+```bash Register a Product
+curl -X POST http://localhost:8080/api/v1/products \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Wireless Keyboard",
+    "description": "Ergonomic wireless keyboard with RGB lighting",
+    "price": 79.99,
+    "category": "Electronics"
+  }'
+```
+
+```bash List All Products
+curl http://localhost:8080/api/v1/products
+```
+
+```bash Add Stock (Inbound)
+curl -X POST http://localhost:8080/api/v1/inventories/inbound \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "<your-product-id>",
+    "quantity": 50,
+    "reason": "Initial stock"
+  }'
+```
+
+```bash Check Stock Balance
+curl http://localhost:8080/api/v1/inventories/<your-product-id>
+```
+</CodeGroup>
+
+## Running with Different Profiles
+
+The application supports three environment profiles:
+
+<Tabs>
+  <Tab title="develop">
+    Development profile with verbose logging and H2 console enabled:
+    ```bash
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=develop'
+    ```
+  </Tab>
+  
+  <Tab title="release">
+    Release candidate profile for staging environments:
+    ```bash
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=release'
+    ```
+  </Tab>
+  
+  <Tab title="prod">
+    Production profile with optimized settings:
+    ```bash
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=prod'
+    ```
+  </Tab>
+</Tabs>
+
+## Switching Persistence Adapters
+
+One of the key features is the ability to swap persistence implementations at runtime:
+
+<Tabs>
+  <Tab title="JPA (Default)">
+    Uses Spring Data JPA with Hibernate:
+    ```bash
+    APP_PERSISTENCE_TYPE=jpa ./gradlew :app-main:bootRun
+    ```
+  </Tab>
+  
+  <Tab title="JDBC">
+    Uses Spring JDBC Template:
+    ```bash
+    APP_PERSISTENCE_TYPE=jdbc ./gradlew :app-main:bootRun
+    ```
+  </Tab>
+  
+  <Tab title="MongoDB">
+    Uses Spring Data MongoDB:
+    ```bash
+    SPRING_DATA_MONGODB_URI='mongodb://root:my-secret-pw@localhost:27017/inventorydb?authSource=admin' \
+    APP_PERSISTENCE_TYPE=mongo \
+    ./gradlew :app-main:bootRun
+    ```
+    
+    <Note>
+      Make sure MongoDB is running on localhost:27017 or update the URI accordingly.
+    </Note>
+  </Tab>
+  
+  <Tab title="Elasticsearch">
+    Uses Spring Data Elasticsearch:
+    ```bash
+    ELASTICSEARCH_URIS='http://localhost:9200' \
+    APP_PERSISTENCE_TYPE=elasticsearch \
+    ./gradlew :app-main:bootRun
+    ```
+    
+    <Note>
+      Ensure Elasticsearch is running and accessible at the specified URI.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Using Different Databases
 
 <AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
+  <Accordion title="PostgreSQL">
+    ```bash
+    DATABASE_URL='jdbc:postgresql://localhost:5432/inventorydb?currentSchema=public&ssl=false' \
+    DATABASE_DRIVER='org.postgresql.Driver' \
+    DATABASE_USERNAME='postgres' \
+    DATABASE_PASSWORD='my-secret-pw' \
+    APP_PERSISTENCE_TYPE='jpa' \
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=release'
+    ```
   </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
+  
+  <Accordion title="MySQL">
+    ```bash
+    DATABASE_URL='jdbc:mysql://localhost:3306/inventorydb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC' \
+    DATABASE_DRIVER='com.mysql.cj.jdbc.Driver' \
+    DATABASE_USERNAME='root' \
+    DATABASE_PASSWORD='rootpassword' \
+    APP_PERSISTENCE_TYPE='jdbc' \
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=prod'
+    ```
+  </Accordion>
+  
+  <Accordion title="H2 (In-Memory)">
+    The default configuration - no additional environment variables needed:
+    ```bash
+    ./gradlew :app-main:bootRun
+    ```
   </Accordion>
 </AccordionGroup>
 
-### Step 2: Deploy your changes
+## API Endpoints Reference
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+| Resource | Method | Path | Description |
+|----------|--------|------|-------------|
+| Products | `POST` | `/api/v1/products` | Register a new product |
+| Products | `GET` | `/api/v1/products` | List all products |
+| Products | `GET` | `/api/v1/products/{productId}` | Get product by ID |
+| Inventory | `POST` | `/api/v1/inventories/inbound` | Add stock (inbound movement) |
+| Inventory | `POST` | `/api/v1/inventories/outbound` | Remove stock (outbound movement) |
+| Inventory | `GET` | `/api/v1/inventories/{productId}` | Get current stock balance |
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Tip>
+  For complete API documentation with request/response schemas, visit the Swagger UI at `http://localhost:8080/swagger-ui.html` when the application is running.
+</Tip>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+## Next Steps
 
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+Now that you have the application running:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Installation Guide" icon="download" href="/installation">
+    Learn about build configuration and dependencies
+  </Card>
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture/overview">
+    Understand the modular hexagonal design
+  </Card>
+  <Card title="Environment Configuration" icon="gear" href="/guides/environment-configuration">
+    Configure for different environments
+  </Card>
+  <Card title="Adding Features" icon="plus" href="/guides/adding-features">
+    Extend the system with new capabilities
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

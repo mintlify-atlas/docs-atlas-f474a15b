@@ -1,0 +1,626 @@
+---
+title: "Inventory Use Cases"
+description: "Business logic interfaces and implementations for inventory movement operations"
+---
+
+## Overview
+
+Inventory use cases encapsulate the business logic for managing stock movements (inbound and outbound) and calculating stock balances. These use cases implement critical business rules such as stock validation and insufficient stock prevention.
+
+<Note>
+  These use cases are part of the Inventory bounded context and follow hexagonal architecture principles, keeping business logic independent of frameworks.
+</Note>
+
+## Architecture Context
+
+Inventory use cases coordinate between multiple repositories:
+
+```
+REST Controller → Use Case Interface → Service Implementation → Repositories
+                                                                   ├─ ProductQueryRepository
+                                                                   ├─ InventoryMovementCommandRepository
+                                                                   └─ InventoryMovementQueryRepository
+```
+
+<Tabs>
+  <Tab title="Interface Layer">
+    **Location:** `core/src/main/java/com/fbaron/ims/inventory/usecase/`
+    
+    Defines contracts for inventory operations.
+  </Tab>
+  
+  <Tab title="Implementation Layer">
+    **Location:** `core/src/main/java/com/fbaron/ims/inventory/service/`
+    
+    Contains complex business logic including validation and stock calculations.
+  </Tab>
+</Tabs>
+
+---
+
+## RegisterMovementUseCase
+
+Handles the registration of inventory movements (both inbound and outbound).
+
+### Interface
+
+```java
+// Source: core/src/main/java/com/fbaron/ims/inventory/usecase/RegisterMovementUseCase.java
+
+package com.fbaron.ims.inventory.usecase;
+
+import com.fbaron.ims.inventory.model.InventoryMovement;
+import java.util.UUID;
+
+public interface RegisterMovementUseCase {
+
+    InventoryMovement inbound(UUID productId, Integer quantity, String reason);
+
+    InventoryMovement outbound(UUID productId, Integer quantity, String reason);
+
+}
+```
+
+### Method: inbound()
+
+<ParamField path="inbound" type="method">
+  Registers an inbound movement, adding stock to a product.
+  
+  **Signature:** `InventoryMovement inbound(UUID productId, Integer quantity, String reason)`
+</ParamField>
+
+#### Parameters
+
+<ParamField path="productId" type="UUID" required>
+  The unique identifier of the product to add stock to. The product must exist in the system.
+</ParamField>
+
+<ParamField path="quantity" type="Integer" required>
+  The number of units to add. Must be a positive integer (> 0).
+</ParamField>
+
+<ParamField path="reason" type="String" required>
+  Human-readable explanation for the stock addition. Required for audit trail.
+  
+  **Examples:**
+  - "Purchase order #PO-2026-001"
+  - "Initial stock setup"
+  - "Return from customer order #12345"
+</ParamField>
+
+#### Returns
+
+<ResponseField name="InventoryMovement" type="InventoryMovement">
+  The created movement record with:
+  - Generated `id`
+  - Complete `product` object
+  - `type` set to `INBOUND`
+  - `createdAt` timestamp
+  - Provided `quantity` and `reason`
+</ResponseField>
+
+#### Throws
+
+<ResponseField name="ProductNotFoundException" type="RuntimeException">
+  Thrown when the specified product does not exist.
+  
+  **HTTP Status:** 404 Not Found
+</ResponseField>
+
+<ResponseField name="InvalidMovementQuantityException" type="RuntimeException">
+  Thrown when quantity is null or not positive.
+  
+  **HTTP Status:** 400 Bad Request
+</ResponseField>
+
+#### Business Rules
+
+<CardGroup cols={2}>
+  <Card title="Product Existence" icon="box-check">
+    The product must exist before stock can be added. The system loads the full product entity for the movement record.
+  </Card>
+  
+  <Card title="Quantity Validation" icon="calculator">
+    Quantity must be a positive integer. Zero or negative values are rejected.
+  </Card>
+  
+  <Card title="Immutable Events" icon="lock">
+    Once created, inbound movements cannot be modified. To correct errors, create compensating movements.
+  </Card>
+  
+  <Card title="No Maximum Limit" icon="infinity">
+    There is no maximum limit on inbound quantities. Any positive integer is accepted.
+  </Card>
+</CardGroup>
+
+### Method: outbound()
+
+<ParamField path="outbound" type="method">
+  Registers an outbound movement, removing stock from a product. Validates sufficient stock exists.
+  
+  **Signature:** `InventoryMovement outbound(UUID productId, Integer quantity, String reason)`
+</ParamField>
+
+#### Parameters
+
+<ParamField path="productId" type="UUID" required>
+  The unique identifier of the product to remove stock from.
+</ParamField>
+
+<ParamField path="quantity" type="Integer" required>
+  The number of units to remove. Must be positive and not exceed available stock.
+</ParamField>
+
+<ParamField path="reason" type="String" required>
+  Human-readable explanation for the stock removal.
+  
+  **Examples:**
+  - "Sale order #SO-2026-456"
+  - "Damaged goods - warehouse inspection"
+  - "Return to supplier"
+</ParamField>
+
+#### Returns
+
+<ResponseField name="InventoryMovement" type="InventoryMovement">
+  The created movement record with `type` set to `OUTBOUND`.
+</ResponseField>
+
+#### Throws
+
+<ResponseField name="ProductNotFoundException" type="RuntimeException">
+  Thrown when the specified product does not exist.
+  
+  **HTTP Status:** 404 Not Found
+</ResponseField>
+
+<ResponseField name="InvalidMovementQuantityException" type="RuntimeException">
+  Thrown when quantity is null or not positive.
+  
+  **HTTP Status:** 400 Bad Request
+</ResponseField>
+
+<ResponseField name="InsufficientStockException" type="RuntimeException">
+  Thrown when the requested quantity exceeds available stock.
+  
+  **Message Format:** `"Cannot exit {quantity} units. Current balance is only {balance}"`
+  
+  **HTTP Status:** 400 Bad Request
+</ResponseField>
+
+#### Business Rules
+
+<CardGroup cols={2}>
+  <Card title="Product Existence" icon="box-check">
+    The product must exist before stock can be removed.
+  </Card>
+  
+  <Card title="Quantity Validation" icon="calculator">
+    Quantity must be a positive integer.
+  </Card>
+  
+  <Card title="Stock Validation" icon="shield-check">
+    Current stock balance is calculated before the movement. If insufficient, the operation fails atomically.
+  </Card>
+  
+  <Card title="No Negative Stock" icon="ban">
+    The system prevents negative stock balances by rejecting outbound movements that would exceed available stock.
+  </Card>
+</CardGroup>
+
+<Warning>
+  **Critical Business Rule:** Outbound movements perform stock validation. Always check current balance before attempting to remove stock to avoid exceptions.
+</Warning>
+
+### Implementation
+
+```java
+// Source: core/src/main/java/com/fbaron/ims/inventory/service/InventoryMovementService.java
+
+@RequiredArgsConstructor
+public class InventoryMovementService 
+    implements RegisterMovementUseCase, GetMovementUseCase {
+
+    private final ProductQueryRepository productQuery;
+    private final InventoryMovementCommandRepository movementCommand;
+    private final InventoryMovementQueryRepository movementQuery;
+
+    @Override
+    public InventoryMovement inbound(UUID productId, Integer quantity, String reason) {
+        validateQuantity(quantity);
+
+        Product product = productQuery.findById(productId)
+                .orElseThrow(() -> new ProductNotFoundException(productId));
+
+        InventoryMovement movement = InventoryMovement.builder()
+                .product(product)
+                .quantity(quantity)
+                .type(MovementType.INBOUND)
+                .reason(reason)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        return movementCommand.save(movement);
+    }
+
+    @Override
+    public InventoryMovement outbound(UUID productId, Integer quantity, String reason) {
+        validateQuantity(quantity);
+
+        Product product = productQuery.findById(productId)
+                .orElseThrow(() -> new ProductNotFoundException(productId));
+
+        Integer currentBalance = calculateStock(productId);
+
+        if (currentBalance < quantity) {
+            throw new InsufficientStockException(
+                "Cannot exit " + quantity + " units. Current balance is only " + currentBalance);
+        }
+
+        InventoryMovement movement = InventoryMovement.builder()
+                .product(product)
+                .quantity(quantity)
+                .type(MovementType.OUTBOUND)
+                .reason(reason)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        return movementCommand.save(movement);
+    }
+
+    private void validateQuantity(Integer quantity) {
+        if (quantity == null || quantity <= 0) {
+            throw new InvalidMovementQuantityException(quantity);
+        }
+    }
+}
+```
+
+#### Implementation Highlights
+
+<Expandable title="Validation Strategy">
+  The implementation uses a multi-layered validation approach:
+  
+  1. **Quantity Validation** - Extracted to private method, reused by both inbound and outbound
+  2. **Product Validation** - Uses Optional pattern to throw meaningful exception
+  3. **Stock Validation** - Only for outbound, calculates current balance before proceeding
+  4. **Timestamp Generation** - `LocalDateTime.now()` ensures accurate audit trail
+</Expandable>
+
+<Expandable title="Why Different Validation for Inbound vs Outbound?">
+  **Inbound movements:**
+  - No stock limit validation needed
+  - Can always add more stock
+  - Simpler, faster execution
+  
+  **Outbound movements:**
+  - Must prevent negative stock
+  - Requires additional query to calculate current balance
+  - More complex but ensures data integrity
+</Expandable>
+
+### Usage Examples
+
+<Tabs>
+  <Tab title="Inbound">
+    ```java
+    // In InventoryRestAdapter
+    @PostMapping("/inbound")
+    public ResponseEntity<InventoryMovementDto> addStock(
+        @Valid @RequestBody RegisterInventoryMovementDto dto) {
+        
+        var registeredMovement = registerMovementUseCase.inbound(
+            dto.productId(), 
+            dto.quantity(), 
+            dto.reason()
+        );
+        
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(inventoryMovementDtoMapper.toDto(registeredMovement));
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Outbound">
+    ```java
+    // In InventoryRestAdapter
+    @PostMapping("/outbound")
+    public ResponseEntity<InventoryMovementDto> removeStock(
+        @Valid @RequestBody RegisterInventoryMovementDto dto) {
+        
+        var registeredMovement = registerMovementUseCase.outbound(
+            dto.productId(), 
+            dto.quantity(), 
+            dto.reason()
+        );
+        
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(inventoryMovementDtoMapper.toDto(registeredMovement));
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## GetMovementUseCase
+
+Handles stock balance calculations based on movement history.
+
+### Interface
+
+```java
+// Source: core/src/main/java/com/fbaron/ims/inventory/usecase/GetMovementUseCase.java
+
+package com.fbaron.ims.inventory.usecase;
+
+import java.util.UUID;
+
+public interface GetMovementUseCase {
+
+    Integer calculateStock(UUID productId);
+
+}
+```
+
+### Method: calculateStock()
+
+<ParamField path="calculateStock" type="method">
+  Calculates the current stock balance for a product by aggregating all movements.
+  
+  **Signature:** `Integer calculateStock(UUID productId)`
+</ParamField>
+
+#### Parameters
+
+<ParamField path="productId" type="UUID" required>
+  The unique identifier of the product to calculate stock for.
+</ParamField>
+
+#### Returns
+
+<ResponseField name="Integer" type="Integer">
+  The current stock balance.
+  
+  **Calculation:** `Sum(INBOUND quantities) - Sum(OUTBOUND quantities)`
+  
+  **Minimum Value:** 0 (no movements or balanced movements)
+</ResponseField>
+
+#### Throws
+
+<ResponseField name="ProductNotFoundException" type="RuntimeException">
+  Thrown when the specified product does not exist.
+  
+  **HTTP Status:** 404 Not Found
+</ResponseField>
+
+#### Business Logic
+
+The stock calculation follows an event-sourcing pattern:
+
+```java
+public Integer calculateStock(UUID productId) {
+    productQuery.findById(productId)
+        .orElseThrow(() -> new ProductNotFoundException(productId));
+
+    Integer inputs = movementQuery.findTotalInputs(productId);
+    Integer outputs = movementQuery.findTotalOutputs(productId);
+
+    return inputs - outputs;
+}
+```
+
+<Expandable title="Event Sourcing Benefits">
+  This approach provides several advantages:
+  
+  1. **Audit Trail** - Complete history of all stock changes
+  2. **Data Integrity** - No separate balance field that can become inconsistent
+  3. **Historical Analysis** - Can calculate stock at any point in time
+  4. **Debugging** - Easy to trace why stock is at current level
+  5. **Compliance** - Meets audit requirements automatically
+</Expandable>
+
+#### Performance Considerations
+
+<Warning>
+  The calculation queries all movements for a product. For high-volume systems, consider:
+  - Database indexes on productId and type
+  - Caching strategies for frequently accessed products
+  - Periodic snapshot calculations for reporting
+</Warning>
+
+### Usage Example
+
+```java
+// In InventoryRestAdapter
+@GetMapping("/{productId}")
+public ResponseEntity<Integer> getStock(
+    @PathVariable("productId") UUID productId) {
+    
+    return ResponseEntity.ok(
+        getMovementUseCase.calculateStock(productId)
+    );
+}
+```
+
+---
+
+## Exception Details
+
+### InsufficientStockException
+
+```java
+// Source: core/src/main/java/com/fbaron/ims/inventory/exception/InsufficientStockException.java
+
+public class InsufficientStockException extends RuntimeException {
+    public InsufficientStockException(String message) {
+        super(message);
+    }
+}
+```
+
+<ParamField path="InsufficientStockException" type="exception">
+  Thrown when an outbound movement would result in negative stock.
+  
+  **Message Format:** `"Cannot exit {quantity} units. Current balance is only {balance}"`
+  
+  **Example:** `"Cannot exit 50 units. Current balance is only 20"`
+  
+  **HTTP Mapping:** 400 Bad Request
+</ParamField>
+
+### InvalidMovementQuantityException
+
+```java
+// Source: core/src/main/java/com/fbaron/ims/inventory/exception/InvalidMovementQuantityException.java
+
+public class InvalidMovementQuantityException extends RuntimeException {
+    public InvalidMovementQuantityException(Integer quantity) {
+        super("Movement quantity must be greater than zero. Received: " + quantity);
+    }
+}
+```
+
+<ParamField path="InvalidMovementQuantityException" type="exception">
+  Thrown when quantity is invalid (null or not positive).
+  
+  **HTTP Mapping:** 400 Bad Request
+</ParamField>
+
+---
+
+## Repository Interfaces
+
+Inventory use cases depend on multiple repository interfaces:
+
+### ProductQueryRepository
+
+```java
+public interface ProductQueryRepository {
+    Optional<Product> findById(UUID id);
+}
+```
+
+<Note>
+  Used to validate product existence and load product details for movements.
+</Note>
+
+### InventoryMovementCommandRepository
+
+```java
+public interface InventoryMovementCommandRepository {
+    InventoryMovement save(InventoryMovement movement);
+}
+```
+
+<Note>
+  Handles persistence of new movement records.
+</Note>
+
+### InventoryMovementQueryRepository
+
+```java
+public interface InventoryMovementQueryRepository {
+    Integer findTotalInputs(UUID productId);
+    Integer findTotalOutputs(UUID productId);
+}
+```
+
+<Note>
+  Provides aggregated movement data for stock calculations.
+</Note>
+
+---
+
+## Testing Use Cases
+
+Inventory use cases can be unit tested with mocked repositories:
+
+```java
+class InventoryMovementServiceTest {
+
+    @Mock
+    private ProductQueryRepository productQuery;
+    
+    @Mock
+    private InventoryMovementCommandRepository movementCommand;
+    
+    @Mock
+    private InventoryMovementQueryRepository movementQuery;
+    
+    @InjectMocks
+    private InventoryMovementService service;
+
+    @Test
+    void shouldCreateInboundMovement() {
+        // Given
+        UUID productId = UUID.randomUUID();
+        Product product = createTestProduct(productId);
+        when(productQuery.findById(productId)).thenReturn(Optional.of(product));
+        
+        InventoryMovement savedMovement = createTestMovement(product);
+        when(movementCommand.save(any())).thenReturn(savedMovement);
+        
+        // When
+        InventoryMovement result = service.inbound(productId, 100, "Test reason");
+        
+        // Then
+        assertNotNull(result);
+        assertEquals(MovementType.INBOUND, result.getType());
+        verify(movementCommand).save(any(InventoryMovement.class));
+    }
+    
+    @Test
+    void shouldThrowExceptionWhenInsufficientStock() {
+        // Given
+        UUID productId = UUID.randomUUID();
+        Product product = createTestProduct(productId);
+        when(productQuery.findById(productId)).thenReturn(Optional.of(product));
+        when(movementQuery.findTotalInputs(productId)).thenReturn(20);
+        when(movementQuery.findTotalOutputs(productId)).thenReturn(0);
+        
+        // When & Then
+        assertThrows(InsufficientStockException.class, 
+            () -> service.outbound(productId, 50, "Test reason"));
+    }
+}
+```
+
+---
+
+## Related Components
+
+<CardGroup cols={3}>
+  <Card title="Inventory Movement Model" icon="arrow-right-arrow-left" href="/api/models/inventory-movement">
+    Domain entity managed by these use cases
+  </Card>
+  
+  <Card title="Inventory REST API" icon="globe" href="/api/inventory">
+    REST endpoints that invoke these use cases
+  </Card>
+  
+  <Card title="Product Use Cases" icon="box" href="/api/use-cases/product-use-cases">
+    Related product management operations
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Validate Before Mutating" icon="shield-check">
+    Always validate business rules (stock availability) before creating movement records. This prevents invalid state.
+  </Card>
+  
+  <Card title="Meaningful Error Messages" icon="message">
+    Provide specific error messages that help users understand what went wrong and how to fix it.
+  </Card>
+  
+  <Card title="Atomic Operations" icon="atom">
+    Each movement registration should be atomic. Either the entire operation succeeds or none of it does.
+  </Card>
+  
+  <Card title="Audit Everything" icon="clock-rotate-left">
+    Always capture reason, timestamp, and full product context for compliance and debugging.
+  </Card>
+</CardGroup>

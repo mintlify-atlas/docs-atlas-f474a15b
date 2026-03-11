@@ -1,0 +1,492 @@
+---
+title: Environment Configuration
+description: Configure the application for different environments and databases
+---
+
+The application uses **environment-driven configuration** via environment variables and Spring profiles, making it easy to deploy across different environments without code changes.
+
+## Spring Profiles
+
+The system supports three environment profiles:
+
+<Tabs>
+  <Tab title="develop">
+    **Development environment** with verbose logging and dev-friendly settings:
+    
+    ```yaml application-develop.yaml
+    spring:
+      jpa:
+        hibernate:
+          ddl-auto: update
+        show-sql: true
+        defer-datasource-initialization: true
+    ```
+    
+    **Features:**
+    - `ddl-auto: update` - Auto-creates/updates database schema
+    - `show-sql: true` - Logs all SQL statements
+    - `defer-datasource-initialization: true` - Loads data.sql after schema creation
+    - H2 console enabled by default
+    
+    **Usage:**
+    ```bash
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=develop'
+    ```
+  </Tab>
+  
+  <Tab title="release">
+    **Release candidate environment** for staging/testing:
+    
+    ```yaml application-release.yaml
+    spring:
+      jpa:
+        hibernate:
+          ddl-auto: validate
+        show-sql: false
+    ```
+    
+    **Features:**
+    - `ddl-auto: validate` - Validates schema but doesn't modify it
+    - `show-sql: false` - No SQL logging
+    - Expects database schema to already exist
+    
+    **Usage:**
+    ```bash
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=release'
+    ```
+  </Tab>
+  
+  <Tab title="prod">
+    **Production environment** with optimized settings:
+    
+    ```yaml application-prod.yaml
+    spring:
+      jpa:
+        hibernate:
+          ddl-auto: validate
+        show-sql: false
+    ```
+    
+    **Features:**
+    - `ddl-auto: validate` - Schema validation only
+    - `show-sql: false` - No SQL logging
+    - Production-optimized connection pools
+    - No H2 console
+    
+    **Usage:**
+    ```bash
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=prod'
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  In **production** and **release** profiles, the database schema must already exist. Use migration tools like Flyway or Liquibase for schema management.
+</Warning>
+
+## Core Configuration
+
+The base `application.yaml` uses environment variables with sensible defaults:
+
+```yaml application.yaml
+spring:
+  application:
+    name: inventory-app-hexagonal
+
+  # Elasticsearch configuration
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    username: ${ELASTICSEARCH_USERNAME:}
+    password: ${ELASTICSEARCH_PASSWORD:}
+
+  # MongoDB configuration
+  data:
+    mongodb:
+      uri: ${SPRING_DATA_MONGODB_URI:${MONGO_URI:mongodb://${MONGO_USERNAME:root}:${MONGO_PASSWORD:my-secret-pw}@${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MONGO_DATABASE:inventorydb}?authSource=${MONGO_AUTH_DB:admin}}}
+
+  # Relational database configuration
+  datasource:
+    url: ${DATABASE_URL:jdbc:h2:mem:inventorydb}
+    driver-class-name: ${DATABASE_DRIVER:org.h2.Driver}
+    username: ${DATABASE_USERNAME:sa}
+    password: ${DATABASE_PASSWORD:}
+    type: com.zaxxer.hikari.HikariDataSource
+    hikari:
+      maximum-pool-size: ${DATABASE_MAX_POOL_SIZE:5}
+
+  # H2 console (dev only)
+  h2:
+    console:
+      enabled: ${H2_CONSOLE_ENABLED:true}
+
+  # JPA configuration
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    show-sql: ${JPA_SHOW_SQL:true}
+    defer-datasource-initialization: ${JPA_DEFER_DATASOURCE_INIT:true}
+
+server:
+  port: 8080
+
+# Adapter selection
+app:
+  persistence:
+    type: ${APP_PERSISTENCE_TYPE:jpa}
+```
+
+## Environment Variables Reference
+
+### Persistence Adapter Selection
+
+| Variable | Values | Default | Description |
+|----------|--------|---------|-------------|
+| `APP_PERSISTENCE_TYPE` | `jpa`, `jdbc`, `mongo`, `elasticsearch` | `jpa` | Selects which persistence adapter to use |
+
+### Relational Database (JPA/JDBC)
+
+<AccordionGroup>
+  <Accordion title="Connection Settings">
+    | Variable | Example | Description |
+    |----------|---------|-------------|
+    | `DATABASE_URL` | `jdbc:postgresql://localhost:5432/inventorydb` | JDBC connection URL |
+    | `DATABASE_DRIVER` | `org.postgresql.Driver` | JDBC driver class |
+    | `DATABASE_USERNAME` | `postgres` | Database username |
+    | `DATABASE_PASSWORD` | `secret123` | Database password |
+    | `DATABASE_MAX_POOL_SIZE` | `10` | HikariCP maximum pool size |
+  </Accordion>
+  
+  <Accordion title="JPA Settings">
+    | Variable | Values | Description |
+    |----------|--------|-------------|
+    | `JPA_DDL_AUTO` | `none`, `validate`, `update`, `create`, `create-drop` | Hibernate schema management |
+    | `JPA_SHOW_SQL` | `true`, `false` | Log SQL statements |
+    | `JPA_DEFER_DATASOURCE_INIT` | `true`, `false` | Load data.sql after schema creation |
+  </Accordion>
+  
+  <Accordion title="H2 Console">
+    | Variable | Values | Description |
+    |----------|--------|-------------|
+    | `H2_CONSOLE_ENABLED` | `true`, `false` | Enable H2 web console |
+    
+    <Info>
+      Access H2 console at `http://localhost:8080/h2-console`
+    </Info>
+  </Accordion>
+</AccordionGroup>
+
+### MongoDB
+
+<Tabs>
+  <Tab title="Option 1: Full URI">
+    | Variable | Example |
+    |----------|---------|  
+    | `SPRING_DATA_MONGODB_URI` | `mongodb://user:pass@localhost:27017/inventorydb?authSource=admin` |
+    
+    ```bash
+    SPRING_DATA_MONGODB_URI='mongodb://root:my-secret-pw@localhost:27017/inventorydb?authSource=admin' \
+    APP_PERSISTENCE_TYPE=mongo \
+    ./gradlew :app-main:bootRun
+    ```
+  </Tab>
+  
+  <Tab title="Option 2: Component Parts">
+    | Variable | Example | Default |
+    |----------|---------|---------|  
+    | `MONGO_USERNAME` | `root` | `root` |
+    | `MONGO_PASSWORD` | `my-secret-pw` | `my-secret-pw` |
+    | `MONGO_HOST` | `mongodb.example.com` | `localhost` |
+    | `MONGO_PORT` | `27017` | `27017` |
+    | `MONGO_DATABASE` | `inventorydb` | `inventorydb` |
+    | `MONGO_AUTH_DB` | `admin` | `admin` |
+    
+    ```bash
+    MONGO_USERNAME=root \
+    MONGO_PASSWORD=secret \
+    MONGO_HOST=mongodb.example.com \
+    MONGO_DATABASE=inventorydb \
+    APP_PERSISTENCE_TYPE=mongo \
+    ./gradlew :app-main:bootRun
+    ```
+    
+    <Note>
+      The URI is constructed from individual variables if `SPRING_DATA_MONGODB_URI` is not provided.
+    </Note>
+  </Tab>
+</Tabs>
+
+### Elasticsearch
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `ELASTICSEARCH_URIS` | `http://localhost:9200` | Comma-separated list of Elasticsearch URIs |
+| `ELASTICSEARCH_USERNAME` | `elastic` | Elasticsearch username |
+| `ELASTICSEARCH_PASSWORD` | `changeme` | Elasticsearch password |
+
+```bash
+ELASTICSEARCH_URIS='http://es1:9200,http://es2:9200' \
+ELASTICSEARCH_USERNAME=elastic \
+ELASTICSEARCH_PASSWORD=changeme \
+APP_PERSISTENCE_TYPE=elasticsearch \
+./gradlew :app-main:bootRun
+```
+
+## Database-Specific Examples
+
+<Tabs>
+  <Tab title="H2 (In-Memory)">
+    **Default configuration** - no environment variables needed:
+    
+    ```bash
+    ./gradlew :app-main:bootRun
+    ```
+    
+    Or explicitly:
+    ```bash
+    DATABASE_URL='jdbc:h2:mem:inventorydb' \
+    DATABASE_DRIVER='org.h2.Driver' \
+    DATABASE_USERNAME='sa' \
+    DATABASE_PASSWORD='' \
+    ./gradlew :app-main:bootRun
+    ```
+    
+    **H2 File-Based:**
+    ```bash
+    DATABASE_URL='jdbc:h2:file:./data/inventorydb' \
+    ./gradlew :app-main:bootRun
+    ```
+  </Tab>
+  
+  <Tab title="PostgreSQL">
+    ```bash
+    DATABASE_URL='jdbc:postgresql://localhost:5432/inventorydb?currentSchema=public&ssl=false' \
+    DATABASE_DRIVER='org.postgresql.Driver' \
+    DATABASE_USERNAME='postgres' \
+    DATABASE_PASSWORD='my-secret-pw' \
+    APP_PERSISTENCE_TYPE='jpa' \
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=release'
+    ```
+    
+    **Docker PostgreSQL:**
+    ```bash
+    docker run -d \
+      --name postgres \
+      -e POSTGRES_PASSWORD=my-secret-pw \
+      -e POSTGRES_DB=inventorydb \
+      -p 5432:5432 \
+      postgres:16
+    ```
+  </Tab>
+  
+  <Tab title="MySQL">
+    ```bash
+    DATABASE_URL='jdbc:mysql://localhost:3306/inventorydb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC' \
+    DATABASE_DRIVER='com.mysql.cj.jdbc.Driver' \
+    DATABASE_USERNAME='root' \
+    DATABASE_PASSWORD='rootpassword' \
+    APP_PERSISTENCE_TYPE='jdbc' \
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=prod'
+    ```
+    
+    **Docker MySQL:**
+    ```bash
+    docker run -d \
+      --name mysql \
+      -e MYSQL_ROOT_PASSWORD=rootpassword \
+      -e MYSQL_DATABASE=inventorydb \
+      -p 3306:3306 \
+      mysql:8
+    ```
+  </Tab>
+  
+  <Tab title="MongoDB">
+    ```bash
+    SPRING_DATA_MONGODB_URI='mongodb://root:my-secret-pw@localhost:27017/inventorydb?authSource=admin' \
+    APP_PERSISTENCE_TYPE='mongo' \
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=prod'
+    ```
+    
+    **Docker MongoDB:**
+    ```bash
+    docker run -d \
+      --name mongodb \
+      -e MONGO_INITDB_ROOT_USERNAME=root \
+      -e MONGO_INITDB_ROOT_PASSWORD=my-secret-pw \
+      -p 27017:27017 \
+      mongo:7
+    ```
+  </Tab>
+  
+  <Tab title="Elasticsearch">
+    ```bash
+    ELASTICSEARCH_URIS='http://localhost:9200' \
+    APP_PERSISTENCE_TYPE='elasticsearch' \
+    ./gradlew :app-main:bootRun --args='--spring.profiles.active=prod'
+    ```
+    
+    **Docker Elasticsearch:**
+    ```bash
+    docker run -d \
+      --name elasticsearch \
+      -e "discovery.type=single-node" \
+      -e "xpack.security.enabled=false" \
+      -p 9200:9200 \
+      elasticsearch:8.11.0
+    ```
+  </Tab>
+</Tabs>
+
+## Configuration Best Practices
+
+<Steps>
+  <Step title="Never Hard-Code Credentials">
+    Always use environment variables for sensitive data:
+    
+    **Good:**
+    ```yaml
+    password: ${DATABASE_PASSWORD}
+    ```
+    
+    **Bad:**
+    ```yaml
+    password: my-secret-password
+    ```
+  </Step>
+  
+  <Step title="Provide Sensible Defaults">
+    Use default values for development convenience:
+    
+    ```yaml
+    url: ${DATABASE_URL:jdbc:h2:mem:inventorydb}
+    ```
+    
+    This allows developers to run the app without configuration.
+  </Step>
+  
+  <Step title="Use Profiles for Environment Differences">
+    Don't create separate configuration files for each database:
+    
+    **Good:** `develop`, `release`, `prod` profiles
+    
+    **Bad:** `h2`, `postgres`, `mysql` profiles
+    
+    Database selection is via `DATABASE_URL`, not profiles.
+  </Step>
+  
+  <Step title="Externalize Configuration in Production">
+    Use environment variables or config servers:
+    
+    ```bash
+    # From environment
+    export DATABASE_URL='jdbc:postgresql://prod-db:5432/inventory'
+    
+    # Or pass to JAR
+    java -jar app.jar \
+      --spring.profiles.active=prod \
+      --spring.datasource.url=jdbc:postgresql://prod-db:5432/inventory
+    ```
+  </Step>
+</Steps>
+
+## Docker Compose Example
+
+Run the entire stack with Docker Compose:
+
+```yaml docker-compose.yml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: inventorydb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      APP_PERSISTENCE_TYPE: jpa
+      DATABASE_URL: jdbc:postgresql://postgres:5432/inventorydb
+      DATABASE_DRIVER: org.postgresql.Driver
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: secret
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No adapter bean found">
+    **Error:** `No qualifying bean of type 'ProductCommandRepository' available`
+    
+    **Cause:** `APP_PERSISTENCE_TYPE` doesn't match any adapter
+    
+    **Solution:** Check the value of `APP_PERSISTENCE_TYPE`:
+    ```bash
+    echo $APP_PERSISTENCE_TYPE
+    # Must be: jpa, jdbc, mongo, or elasticsearch
+    ```
+  </Accordion>
+  
+  <Accordion title="Connection refused">
+    **Error:** `Connection refused: localhost:5432`
+    
+    **Cause:** Database not running or wrong host/port
+    
+    **Solution:** 
+    1. Verify database is running: `docker ps` or `netstat -an | grep 5432`
+    2. Check `DATABASE_URL` has correct host and port
+    3. Use `host.docker.internal` instead of `localhost` when app runs in Docker
+  </Accordion>
+  
+  <Accordion title="Schema validation failed">
+    **Error:** `Schema-validation: missing table [products]`
+    
+    **Cause:** `ddl-auto: validate` but schema doesn't exist
+    
+    **Solution:**
+    1. Create schema manually or use migration tool
+    2. Or use `ddl-auto: update` in dev environments
+    3. Check you're connecting to the right database
+  </Accordion>
+  
+  <Accordion title="Authentication failed">
+    **Error:** `Access denied for user 'root'@'localhost'`
+    
+    **Cause:** Wrong credentials in `DATABASE_USERNAME`/`DATABASE_PASSWORD`
+    
+    **Solution:**
+    1. Verify credentials match your database setup
+    2. Check for typos in environment variables
+    3. Ensure user has necessary privileges
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Persistence Adapters" icon="database" href="/guides/persistence-adapters">
+    Learn about each persistence technology
+  </Card>
+  <Card title="Testing Strategies" icon="vial" href="/guides/testing-strategies">
+    Test with different configurations
+  </Card>
+  <Card title="Adding Features" icon="plus" href="/guides/adding-features">
+    Extend the application
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Quick setup examples
+  </Card>
+</CardGroup>

@@ -1,0 +1,563 @@
+---
+title: Inventory Movements
+description: Understanding inventory tracking through movement records
+---
+
+The **Inventory Movements** domain tracks all stock changes (inbound and outbound) and calculates current stock levels.
+
+## Domain Model
+
+The `InventoryMovement` model represents a single stock transaction:
+
+```java InventoryMovement.java
+package com.fbaron.ims.inventory.model;
+
+import com.fbaron.ims.product.model.Product;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Getter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class InventoryMovement {
+    private UUID id;
+    private Product product;
+    private Integer quantity;
+    private MovementType type;
+    private LocalDateTime createdAt;
+    private String reason;
+}
+```
+
+### Field Descriptions
+
+| Field | Type | Description | Constraints |
+|-------|------|-------------|-------------|
+| `id` | `UUID` | Unique movement identifier | Auto-generated |
+| `product` | `Product` | Associated product | Required |
+| `quantity` | `Integer` | Amount of stock moved | Required, > 0 |
+| `type` | `MovementType` | Direction of movement | INBOUND or OUTBOUND |
+| `createdAt` | `LocalDateTime` | When the movement occurred | Auto-set |
+| `reason` | `String` | Why the movement happened | Optional |
+
+### Movement Types
+
+```java MovementType.java
+package com.fbaron.ims.inventory.model;
+
+public enum MovementType {
+    INBOUND,   // Stock entering inventory (purchases, returns)
+    OUTBOUND   // Stock leaving inventory (sales, damages)
+}
+```
+
+<Info>
+  Stock balance is calculated by: **Total INBOUND - Total OUTBOUND**. This event-sourcing approach maintains a complete audit trail.
+</Info>
+
+## Use Cases
+
+<Tabs>
+  <Tab title="RegisterMovementUseCase">
+    **Purpose:** Record stock movements (inbound or outbound)
+    
+    ```java RegisterMovementUseCase.java
+    package com.fbaron.ims.inventory.usecase;
+    
+    import com.fbaron.ims.inventory.model.InventoryMovement;
+    import java.util.UUID;
+    
+    public interface RegisterMovementUseCase {
+        InventoryMovement inbound(UUID productId, Integer quantity, String reason);
+        InventoryMovement outbound(UUID productId, Integer quantity, String reason);
+    }
+    ```
+    
+    **Inbound Example:**
+    ```java
+    // Record receiving 100 units
+    InventoryMovement movement = registerMovementUseCase.inbound(
+        productId,
+        100,
+        "Purchase order #12345"
+    );
+    ```
+    
+    **Outbound Example:**
+    ```java
+    // Record selling 25 units
+    InventoryMovement movement = registerMovementUseCase.outbound(
+        productId,
+        25,
+        "Sales order #67890"
+    );
+    ```
+    
+    **Business Rules:**
+    - Quantity must be greater than zero
+    - Product must exist
+    - Outbound movements require sufficient stock
+  </Tab>
+  
+  <Tab title="GetMovementUseCase">
+    **Purpose:** Calculate current stock balance
+    
+    ```java GetMovementUseCase.java
+    package com.fbaron.ims.inventory.usecase;
+    
+    import java.util.UUID;
+    
+    public interface GetMovementUseCase {
+        Integer calculateStock(UUID productId);
+    }
+    ```
+    
+    **Usage:**
+    ```java
+    Integer currentStock = getMovementUseCase.calculateStock(productId);
+    // Returns: inbound_total - outbound_total
+    ```
+  </Tab>
+</Tabs>
+
+## Service Implementation
+
+The `InventoryMovementService` implements complex business logic:
+
+```java InventoryMovementService.java
+package com.fbaron.ims.inventory.service;
+
+import com.fbaron.ims.inventory.exception.InsufficientStockException;
+import com.fbaron.ims.inventory.exception.InvalidMovementQuantityException;
+import com.fbaron.ims.inventory.model.InventoryMovement;
+import com.fbaron.ims.inventory.model.MovementType;
+import com.fbaron.ims.inventory.repository.InventoryMovementCommandRepository;
+import com.fbaron.ims.inventory.repository.InventoryMovementQueryRepository;
+import com.fbaron.ims.inventory.usecase.GetMovementUseCase;
+import com.fbaron.ims.inventory.usecase.RegisterMovementUseCase;
+import com.fbaron.ims.product.model.Product;
+import com.fbaron.ims.product.exception.ProductNotFoundException;
+import com.fbaron.ims.product.repository.ProductQueryRepository;
+import lombok.RequiredArgsConstructor;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@RequiredArgsConstructor
+public class InventoryMovementService implements 
+        RegisterMovementUseCase, 
+        GetMovementUseCase {
+
+    private final ProductQueryRepository productQuery;
+    private final InventoryMovementCommandRepository movementCommand;
+    private final InventoryMovementQueryRepository movementQuery;
+
+    @Override
+    public InventoryMovement inbound(UUID productId, Integer quantity, String reason) {
+        validateQuantity(quantity);
+
+        Product product = productQuery.findById(productId)
+                .orElseThrow(() -> new ProductNotFoundException(productId));
+
+        InventoryMovement movement = InventoryMovement.builder()
+                .product(product)
+                .quantity(quantity)
+                .type(MovementType.INBOUND)
+                .reason(reason)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        return movementCommand.save(movement);
+    }
+
+    @Override
+    public InventoryMovement outbound(UUID productId, Integer quantity, String reason) {
+        validateQuantity(quantity);
+
+        Product product = productQuery.findById(productId)
+                .orElseThrow(() -> new ProductNotFoundException(productId));
+
+        Integer currentBalance = calculateStock(productId);
+
+        if (currentBalance < quantity) {
+            throw new InsufficientStockException(
+                "Cannot exit " + quantity + " units. Current balance is only " + currentBalance
+            );
+        }
+
+        InventoryMovement movement = InventoryMovement.builder()
+                .product(product)
+                .quantity(quantity)
+                .type(MovementType.OUTBOUND)
+                .reason(reason)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        return movementCommand.save(movement);
+    }
+
+    @Override
+    public Integer calculateStock(UUID productId) {
+        productQuery.findById(productId)
+                .orElseThrow(() -> new ProductNotFoundException(productId));
+
+        Integer inputs = movementQuery.findTotalInputs(productId);
+        Integer outputs = movementQuery.findTotalOutputs(productId);
+
+        return inputs - outputs;
+    }
+
+    private void validateQuantity(Integer quantity) {
+        if (quantity == null || quantity <= 0) {
+            throw new InvalidMovementQuantityException(quantity);
+        }
+    }
+}
+```
+
+<Note>
+  The **outbound** method validates sufficient stock exists before allowing the movement, preventing negative inventory.
+</Note>
+
+## Repository Ports
+
+<Tabs>
+  <Tab title="InventoryMovementCommandRepository">
+    **Handles write operations:**
+    
+    ```java InventoryMovementCommandRepository.java
+    package com.fbaron.ims.inventory.repository;
+    
+    import com.fbaron.ims.inventory.model.InventoryMovement;
+    
+    public interface InventoryMovementCommandRepository {
+        InventoryMovement save(InventoryMovement inventoryMovement);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="InventoryMovementQueryRepository">
+    **Handles read operations with aggregations:**
+    
+    ```java InventoryMovementQueryRepository.java
+    package com.fbaron.ims.inventory.repository;
+    
+    import java.util.UUID;
+    
+    public interface InventoryMovementQueryRepository {
+        Integer findTotalInputs(UUID productId);
+        Integer findTotalOutputs(UUID productId);
+    }
+    ```
+    
+    These methods aggregate movements to calculate totals.
+  </Tab>
+</Tabs>
+
+## REST API
+
+### Endpoints
+
+<AccordionGroup>
+  <Accordion title="POST /api/v1/inventories/inbound - Add Stock">
+    **Request:**
+    ```json
+    {
+      "productId": "550e8400-e29b-41d4-a716-446655440000",
+      "quantity": 100,
+      "reason": "Purchase order #12345"
+    }
+    ```
+    
+    **Response (201 Created):**
+    ```json
+    {
+      "id": "770e8400-e29b-41d4-a716-446655440002",
+      "productId": "550e8400-e29b-41d4-a716-446655440000",
+      "quantity": 100,
+      "type": "INBOUND",
+      "reason": "Purchase order #12345",
+      "createdAt": "2026-03-11T10:30:00"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="POST /api/v1/inventories/outbound - Remove Stock">
+    **Request:**
+    ```json
+    {
+      "productId": "550e8400-e29b-41d4-a716-446655440000",
+      "quantity": 25,
+      "reason": "Sales order #67890"
+    }
+    ```
+    
+    **Response (201 Created):**
+    ```json
+    {
+      "id": "880e8400-e29b-41d4-a716-446655440003",
+      "productId": "550e8400-e29b-41d4-a716-446655440000",
+      "quantity": 25,
+      "type": "OUTBOUND",
+      "reason": "Sales order #67890",
+      "createdAt": "2026-03-11T14:20:00"
+    }
+    ```
+    
+    **Error (400 Bad Request - Insufficient Stock):**
+    ```json
+    {
+      "message": "Cannot exit 25 units. Current balance is only 10",
+      "timestamp": "2026-03-11T14:20:00Z"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="GET /api/v1/inventories/{productId} - Get Stock Balance">
+    **Response (200 OK):**
+    ```json
+    75
+    ```
+    
+    This represents the current stock: total inbound (100) - total outbound (25) = 75
+  </Accordion>
+</AccordionGroup>
+
+### Controller Implementation
+
+```java InventoryRestAdapter.java
+package com.fbaron.ims.inventory.rest;
+
+import com.fbaron.ims.inventory.dto.InventoryMovementDto;
+import com.fbaron.ims.inventory.dto.RegisterInventoryMovementDto;
+import com.fbaron.ims.inventory.mapper.InventoryMovementDtoMapper;
+import com.fbaron.ims.inventory.usecase.GetMovementUseCase;
+import com.fbaron.ims.inventory.usecase.RegisterMovementUseCase;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.UUID;
+
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/api/v1/inventories")
+public class InventoryRestAdapter {
+
+    private final GetMovementUseCase getMovementUseCase;
+    private final RegisterMovementUseCase registerMovementUseCase;
+    private final InventoryMovementDtoMapper inventoryMovementDtoMapper;
+
+    @PostMapping("/inbound")
+    public ResponseEntity<InventoryMovementDto> addStock(
+            @Valid @RequestBody RegisterInventoryMovementDto dto) {
+        var registeredMovement = registerMovementUseCase.inbound(
+            dto.productId(), 
+            dto.quantity(), 
+            dto.reason()
+        );
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(inventoryMovementDtoMapper.toDto(registeredMovement));
+    }
+
+    @PostMapping("/outbound")
+    public ResponseEntity<InventoryMovementDto> removeStock(
+            @Valid @RequestBody RegisterInventoryMovementDto dto) {
+        var registeredMovement = registerMovementUseCase.outbound(
+            dto.productId(), 
+            dto.quantity(), 
+            dto.reason()
+        );
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(inventoryMovementDtoMapper.toDto(registeredMovement));
+    }
+
+    @GetMapping("/{productId}")
+    public ResponseEntity<Integer> getStock(@PathVariable("productId") UUID productId) {
+        return ResponseEntity.ok(getMovementUseCase.calculateStock(productId));
+    }
+}
+```
+
+## Domain Exceptions
+
+<Tabs>
+  <Tab title="InsufficientStockException">
+    ```java InsufficientStockException.java
+    package com.fbaron.ims.inventory.exception;
+    
+    public class InsufficientStockException extends RuntimeException {
+        public InsufficientStockException(String message) {
+            super(message);
+        }
+    }
+    ```
+    
+    **Thrown when:** Attempting to remove more stock than available
+    
+    **HTTP Status:** 400 Bad Request
+  </Tab>
+  
+  <Tab title="InvalidMovementQuantityException">
+    ```java InvalidMovementQuantityException.java
+    package com.fbaron.ims.inventory.exception;
+    
+    public class InvalidMovementQuantityException extends RuntimeException {
+        public InvalidMovementQuantityException(Integer quantity) {
+            super("Movement quantity must be greater than zero. Received: " + quantity);
+        }
+    }
+    ```
+    
+    **Thrown when:** Quantity is null or less than or equal to 0
+    
+    **HTTP Status:** 400 Bad Request
+  </Tab>
+</Tabs>
+
+## Example Workflows
+
+<Steps>
+  <Step title="Receive Stock from Supplier">
+    ```bash
+    curl -X POST http://localhost:8080/api/v1/inventories/inbound \
+      -H "Content-Type: application/json" \
+      -d '{
+        "productId": "550e8400-e29b-41d4-a716-446655440000",
+        "quantity": 500,
+        "reason": "Supplier delivery - Invoice #INV-2024-001"
+      }'
+    ```
+  </Step>
+  
+  <Step title="Sell Products to Customer">
+    ```bash
+    curl -X POST http://localhost:8080/api/v1/inventories/outbound \
+      -H "Content-Type: application/json" \
+      -d '{
+        "productId": "550e8400-e29b-41d4-a716-446655440000",
+        "quantity": 50,
+        "reason": "Customer order #ORD-2024-123"
+      }'
+    ```
+  </Step>
+  
+  <Step title="Check Current Stock">
+    ```bash
+    curl http://localhost:8080/api/v1/inventories/550e8400-e29b-41d4-a716-446655440000
+    # Returns: 450 (500 inbound - 50 outbound)
+    ```
+  </Step>
+</Steps>
+
+## Stock Calculation
+
+The system uses **aggregate queries** to calculate stock:
+
+```sql Example JPA Query
+SELECT COALESCE(SUM(im.quantity), 0)
+FROM InventoryMovementJpaEntity im
+WHERE im.product.id = :productId 
+  AND im.type = 'INBOUND'
+```
+
+```sql Outbound Query
+SELECT COALESCE(SUM(im.quantity), 0)
+FROM InventoryMovementJpaEntity im
+WHERE im.product.id = :productId 
+  AND im.type = 'OUTBOUND'
+```
+
+**Final Balance:**
+```
+Current Stock = Total Inbound - Total Outbound
+```
+
+<Info>
+  This approach maintains a complete audit trail of all stock changes, enabling historical analysis and compliance reporting.
+</Info>
+
+## Common Use Cases
+
+<AccordionGroup>
+  <Accordion title="Receiving Inventory">
+    - Purchase from supplier
+    - Return from customer
+    - Transfer from another warehouse
+    - Production completion
+    
+    All use `inbound()` with appropriate reason.
+  </Accordion>
+  
+  <Accordion title="Releasing Inventory">
+    - Sale to customer
+    - Return to supplier
+    - Transfer to another warehouse
+    - Damaged/expired goods
+    
+    All use `outbound()` with validation.
+  </Accordion>
+  
+  <Accordion title="Stock Adjustments">
+    For corrections:
+    - Increase: Use `inbound()` with reason "Adjustment: stock count correction"
+    - Decrease: Use `outbound()` with reason "Adjustment: reconciliation"
+  </Accordion>
+</AccordionGroup>
+
+## Testing Inventory
+
+<CodeGroup>
+```java Unit Test
+@Test
+void outboundThrowsWhenInsufficientStock() {
+    UUID productId = UUID.randomUUID();
+    Product product = Product.builder().id(productId).build();
+    
+    when(productQuery.findById(productId))
+        .thenReturn(Optional.of(product));
+    when(movementQuery.findTotalInputs(productId)).thenReturn(10);
+    when(movementQuery.findTotalOutputs(productId)).thenReturn(0);
+
+    assertThrows(
+        InsufficientStockException.class,
+        () -> service.outbound(productId, 50, "Sale")
+    );
+}
+```
+
+```bash Integration Test
+# Add stock
+curl -X POST http://localhost:8080/api/v1/inventories/inbound \
+  -d '{"productId":"...","quantity":100,"reason":"Test"}'
+
+# Check balance
+curl http://localhost:8080/api/v1/inventories/...
+# Should return: 100
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Products Domain" icon="box" href="/domain/products">
+    Learn about product management
+  </Card>
+  <Card title="Testing Strategies" icon="vial" href="/guides/testing-strategies">
+    Test inventory logic
+  </Card>
+  <Card title="Adding Features" icon="plus" href="/guides/adding-features">
+    Extend inventory capabilities
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Try the inventory API
+  </Card>
+</CardGroup>

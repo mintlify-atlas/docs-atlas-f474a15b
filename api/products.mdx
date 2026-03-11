@@ -1,0 +1,302 @@
+---
+title: "Product Endpoints"
+description: "REST API endpoints for managing products in the inventory system"
+---
+
+## Register Product
+
+<ParamField path="POST" type="endpoint">
+  /api/v1/products
+</ParamField>
+
+Registers a new product in the inventory system. This endpoint validates the product data and persists it to the database.
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  The product name. Must not be blank.
+  
+  **Validation:** `@NotBlank` - Product name is required
+</ParamField>
+
+<ParamField body="price" type="BigDecimal" required>
+  The product price. Must be greater than zero.
+  
+  **Validation:** 
+  - `@NotNull` - Product price is required
+  - `@DecimalMin(0.01)` - Product price must be greater than zero
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional product description providing additional details about the product.
+</ParamField>
+
+<ParamField body="category" type="string" required>
+  The product category for classification.
+  
+  **Validation:** `@NotBlank` - Product category is required
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="UUID">
+  Unique identifier automatically generated for the product
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The product name
+</ResponseField>
+
+<ResponseField name="price" type="BigDecimal">
+  The product price
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  The product description
+</ResponseField>
+
+<ResponseField name="category" type="string">
+  The product category
+</ResponseField>
+
+### Status Codes
+
+- **201 Created** - Product successfully registered
+- **400 Bad Request** - Validation error (missing required fields or invalid values)
+- **500 Internal Server Error** - Server error
+
+### Examples
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8080/api/v1/products \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Laptop Dell XPS 15",
+    "price": 1299.99,
+    "description": "High-performance laptop with 16GB RAM",
+    "category": "Electronics"
+  }'
+```
+
+```json Response (201)
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Laptop Dell XPS 15",
+  "price": 1299.99,
+  "description": "High-performance laptop with 16GB RAM",
+  "category": "Electronics"
+}
+```
+
+```json Error (400)
+{
+  "timestamp": "2026-03-11T10:30:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Product name is required"
+}
+```
+
+</CodeGroup>
+
+<Note>
+  The product ID is automatically generated using UUID and cannot be specified in the request.
+</Note>
+
+---
+
+## Get All Products
+
+<ParamField path="GET" type="endpoint">
+  /api/v1/products
+</ParamField>
+
+Retrieves a list of all products registered in the system.
+
+### Response
+
+Returns an array of product objects.
+
+<Expandable title="Product Object Structure">
+  <ResponseField name="id" type="UUID">
+    Unique product identifier
+  </ResponseField>
+  
+  <ResponseField name="name" type="string">
+    Product name
+  </ResponseField>
+  
+  <ResponseField name="price" type="BigDecimal">
+    Product price
+  </ResponseField>
+  
+  <ResponseField name="description" type="string">
+    Product description
+  </ResponseField>
+  
+  <ResponseField name="category" type="string">
+    Product category
+  </ResponseField>
+</Expandable>
+
+### Status Codes
+
+- **200 OK** - Products retrieved successfully
+- **500 Internal Server Error** - Server error
+
+### Examples
+
+<CodeGroup>
+
+```bash curl
+curl -X GET http://localhost:8080/api/v1/products
+```
+
+```json Response (200)
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Laptop Dell XPS 15",
+    "price": 1299.99,
+    "description": "High-performance laptop with 16GB RAM",
+    "category": "Electronics"
+  },
+  {
+    "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    "name": "Wireless Mouse",
+    "price": 29.99,
+    "description": "Ergonomic wireless mouse",
+    "category": "Accessories"
+  }
+]
+```
+
+```json Empty Response (200)
+[]
+```
+
+</CodeGroup>
+
+---
+
+## Get Product by ID
+
+<ParamField path="GET" type="endpoint">
+  /api/v1/products/{productId}
+</ParamField>
+
+Retrieves a specific product by its unique identifier.
+
+### Path Parameters
+
+<ParamField path="productId" type="UUID" required>
+  The unique identifier of the product to retrieve
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="UUID">
+  Unique product identifier
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Product name
+</ResponseField>
+
+<ResponseField name="price" type="BigDecimal">
+  Product price
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Product description
+</ResponseField>
+
+<ResponseField name="category" type="string">
+  Product category
+</ResponseField>
+
+### Status Codes
+
+- **200 OK** - Product found and returned
+- **404 Not Found** - Product with specified ID does not exist
+- **500 Internal Server Error** - Server error
+
+### Examples
+
+<CodeGroup>
+
+```bash curl
+curl -X GET http://localhost:8080/api/v1/products/550e8400-e29b-41d4-a716-446655440000
+```
+
+```json Response (200)
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Laptop Dell XPS 15",
+  "price": 1299.99,
+  "description": "High-performance laptop with 16GB RAM",
+  "category": "Electronics"
+}
+```
+
+```json Error (404)
+{
+  "timestamp": "2026-03-11T10:30:00",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Product not found with ID: 550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+</CodeGroup>
+
+<Warning>
+  The productId must be a valid UUID format. Invalid UUID formats will result in a 400 Bad Request error.
+</Warning>
+
+---
+
+## Implementation Reference
+
+The Product REST endpoints are implemented in the adapter layer following hexagonal architecture:
+
+```java
+// Source: web/src/main/java/com/fbaron/ims/product/rest/ProductRestAdapter.java
+
+@RestController
+@RequestMapping("/api/v1/products")
+public class ProductRestAdapter {
+
+    private final GetProductUseCase getProductUseCase;
+    private final RegisterProductUseCase registerProductUseCase;
+    private final ProductDtoMapper productDtoMapper;
+
+    @PostMapping
+    public ResponseEntity<ProductDto> registerProduct(
+        @Valid @RequestBody RegisterProductDto dto) {
+        var product = productDtoMapper.toModel(dto);
+        var registeredProduct = registerProductUseCase.register(product);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(productDtoMapper.toDto(registeredProduct));
+    }
+
+    @GetMapping
+    public ResponseEntity<List<ProductDto>> getAll() {
+        var products = getProductUseCase.getAll();
+        return ResponseEntity.ok(productDtoMapper.toDto(products));
+    }
+
+    @GetMapping("/{productId}")
+    public ResponseEntity<ProductDto> getById(
+        @PathVariable("productId") UUID productId) {
+        var product = getProductUseCase.getById(productId);
+        return ResponseEntity.ok(productDtoMapper.toDto(product));
+    }
+}
+```
+
+<Note>
+  See [Product Use Cases](/api/use-cases/product-use-cases) for detailed business logic implementation and [Product Model](/api/models/product) for domain model structure.
+</Note>

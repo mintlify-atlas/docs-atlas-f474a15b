@@ -1,0 +1,334 @@
+---
+title: Installation
+description: Build configuration, dependencies, and project structure
+---
+
+Learn how the project is structured and configured using Gradle's multi-module system.
+
+## Project Structure
+
+The project uses Gradle multi-module configuration to enforce strict boundaries between layers:
+
+```
+inventory-app-multi-module-hexagonal/
+├── core/              # Pure business logic (no framework deps)
+├── data/              # Persistence adapters (JPA, JDBC, Mongo, ES)
+├── web/               # REST API adapters
+├── app-main/          # Bootstrap application
+├── build.gradle       # Root build configuration
+└── settings.gradle    # Module declarations
+```
+
+<Info>
+  Each module is a separate Gradle project with its own `build.gradle` file, allowing fine-grained dependency control.
+</Info>
+
+## Root Build Configuration
+
+The root `build.gradle` configures shared dependencies and build settings for all subprojects:
+
+```groovy build.gradle
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.10' apply false
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+allprojects {
+    group = 'com.fbaron'
+    version = '0.0.1-SNAPSHOT'
+}
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'io.spring.dependency-management'
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
+
+    dependencies {
+        // Lombok for reducing boilerplate
+        compileOnly 'org.projectlombok:lombok:1.18.30'
+        annotationProcessor 'org.projectlombok:lombok:1.18.30'
+
+        // MapStruct for object mapping
+        implementation 'org.mapstruct:mapstruct:1.6.3'
+        annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.3'
+        annotationProcessor 'org.projectlombok:lombok-mapstruct-binding:0.2.0'
+
+        // Testing dependencies
+        testImplementation 'org.springframework.boot:spring-boot-starter-test'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+}
+```
+
+<Note>
+  **Java 21 Toolchain:** The project explicitly requires Java 21, ensuring consistent builds across different environments.
+</Note>
+
+## Module Declarations
+
+The `settings.gradle` file declares all modules:
+
+```groovy settings.gradle
+rootProject.name = 'inventory-app-multi-module-hexagonal'
+
+include 'core'
+include 'data'
+include 'web'
+include 'app-main'
+```
+
+## Module Dependencies
+
+<Tabs>
+  <Tab title="core">
+    The **core** module has **zero external dependencies** (except Lombok and MapStruct for code generation):
+    
+    ```groovy core/build.gradle
+    plugins {
+        id 'java-library'
+    }
+
+    dependencies {
+        // No external framework dependencies!
+        // Only Lombok and MapStruct inherited from parent
+    }
+    ```
+    
+    <Info>
+      This is the **key principle** of hexagonal architecture: the core business logic is completely framework-agnostic.
+    </Info>
+  </Tab>
+  
+  <Tab title="data">
+    The **data** module contains all persistence adapters and depends on the core:
+    
+    ```groovy data/build.gradle
+    plugins {
+        id 'java-library'
+    }
+
+    dependencies {
+        api project(':core')
+
+        implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+        implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+        implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
+        implementation 'org.springframework.boot:spring-boot-starter-data-elasticsearch'
+
+        implementation 'jakarta.inject:jakarta.inject-api:2.0.1'
+
+        runtimeOnly 'org.postgresql:postgresql'
+        runtimeOnly 'com.mysql:mysql-connector-j'
+        runtimeOnly 'com.h2database:h2'
+    }
+    ```
+    
+    <Note>
+      All four persistence adapters are included, but only one is activated at runtime via `@ConditionalOnProperty`.
+    </Note>
+  </Tab>
+  
+  <Tab title="web">
+    The **web** module provides REST API adapters:
+    
+    ```groovy web/build.gradle
+    dependencies {
+        implementation project(':core')
+        implementation 'org.springframework.boot:spring-boot-starter-web'
+        implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+        implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.15'
+    }
+    ```
+  </Tab>
+  
+  <Tab title="app-main">
+    The **app-main** module bootstraps the application and wires everything together:
+    
+    ```groovy app-main/build.gradle
+    plugins {
+        id 'org.springframework.boot'
+    }
+
+    dependencies {
+        implementation project(':core')
+        implementation project(':data')
+        implementation project(':web')
+    }
+    ```
+    
+    This is the only runnable module with the `@SpringBootApplication` entry point.
+  </Tab>
+</Tabs>
+
+## Key Dependencies
+
+<AccordionGroup>
+  <Accordion title="Lombok 1.18.30">
+    Reduces boilerplate code with annotations like `@Getter`, `@Builder`, `@RequiredArgsConstructor`.
+    
+    ```java
+    @Getter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public class Product {
+        private UUID id;
+        private String name;
+        private String description;
+        private BigDecimal price;
+        private String category;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="MapStruct 1.6.3">
+    Compile-time code generation for type-safe object mapping between layers.
+    
+    ```java
+    @Mapper(componentModel = "spring")
+    public interface ProductDtoMapper {
+        ProductDto toDto(Product product);
+        Product toModel(RegisterProductDto dto);
+        List<ProductDto> toDto(List<Product> products);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Spring Boot 3.5.10">
+    Latest Spring Boot version providing:
+    - Dependency injection via `@Bean` configuration
+    - Auto-configuration for data sources
+    - Web server and REST support
+    - Testing utilities
+  </Accordion>
+  
+  <Accordion title="Spring Data (JPA, JDBC, MongoDB, Elasticsearch)">
+    Multiple persistence technologies, all implementing the same repository ports from the core module.
+  </Accordion>
+  
+  <Accordion title="SpringDoc OpenAPI 2.8.15">
+    Automatic API documentation generation accessible at `/swagger-ui.html`.
+  </Accordion>
+</AccordionGroup>
+
+## Building the Project
+
+<Steps>
+  <Step title="Build All Modules">
+    ```bash
+    ./gradlew build
+    ```
+    
+    This compiles all modules, runs tests, and creates JAR files.
+  </Step>
+  
+  <Step title="Run Tests">
+    ```bash
+    ./gradlew test
+    ```
+    
+    Runs unit tests in all modules using JUnit 5 and Mockito.
+  </Step>
+  
+  <Step title="Build Without Tests">
+    ```bash
+    ./gradlew build -x test
+    ```
+    
+    Useful for faster builds during development.
+  </Step>
+  
+  <Step title="Clean Build">
+    ```bash
+    ./gradlew clean build
+    ```
+    
+    Removes all build artifacts and rebuilds from scratch.
+  </Step>
+</Steps>
+
+## Running the Application
+
+<CodeGroup>
+```bash Development
+./gradlew :app-main:bootRun --args='--spring.profiles.active=develop'
+```
+
+```bash Production JAR
+./gradlew :app-main:bootJar
+java -jar app-main/build/libs/app-main-0.0.1-SNAPSHOT.jar
+```
+
+```bash With Custom Port
+SERVER_PORT=9090 ./gradlew :app-main:bootRun
+```
+</CodeGroup>
+
+## IDE Configuration
+
+<Tabs>
+  <Tab title="IntelliJ IDEA">
+    1. **Import Project:** File → Open → Select root `build.gradle`
+    2. **Enable Annotation Processing:** 
+       - Settings → Build, Execution, Deployment → Compiler → Annotation Processors
+       - Check "Enable annotation processing"
+    3. **Install Lombok Plugin:** Settings → Plugins → Search "Lombok" → Install
+    4. **Set Project SDK:** Project Structure → Project → SDK → Java 21
+  </Tab>
+  
+  <Tab title="Eclipse">
+    1. **Import Project:** File → Import → Gradle → Existing Gradle Project
+    2. **Install Lombok:** 
+       - Download lombok.jar from https://projectlombok.org/download
+       - Run `java -jar lombok.jar` and point to Eclipse installation
+    3. **Enable Annotation Processing:** 
+       - Project Properties → Java Compiler → Annotation Processing
+       - Check "Enable project specific settings"
+  </Tab>
+  
+  <Tab title="VS Code">
+    1. **Install Extensions:**
+       - Extension Pack for Java
+       - Gradle for Java
+       - Lombok Annotations Support
+    2. **Configure Java 21:**
+       - Settings → Java: Configuration → Runtime
+       - Add Java 21 installation path
+  </Tab>
+</Tabs>
+
+## Gradle Wrapper
+
+The project includes Gradle Wrapper for consistent builds:
+
+```bash
+./gradlew --version
+```
+
+<Info>
+  The wrapper ensures all developers use the same Gradle version, regardless of local installations.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture/overview">
+    Understand how the modules interact
+  </Card>
+  <Card title="Module Structure" icon="folder-tree" href="/architecture/module-structure">
+    Deep dive into each module's organization
+  </Card>
+  <Card title="Ports and Adapters" icon="plug" href="/architecture/ports-and-adapters">
+    Learn the hexagonal architecture pattern
+  </Card>
+  <Card title="Testing Strategies" icon="vial" href="/guides/testing-strategies">
+    Write effective tests for each layer
+  </Card>
+</CardGroup>

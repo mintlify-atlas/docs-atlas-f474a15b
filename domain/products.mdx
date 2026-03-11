@@ -1,0 +1,478 @@
+---
+title: Products Domain
+description: Understanding the Product domain model and operations
+---
+
+The **Products** domain manages product information and serves as the foundation for inventory tracking.
+
+## Domain Model
+
+The `Product` model represents items that can be tracked in inventory:
+
+```java Product.java
+package com.fbaron.ims.product.model;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+import java.math.BigDecimal;
+import java.util.UUID;
+
+@Getter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Product {
+    private UUID id;
+    private String name;
+    private String description;
+    private BigDecimal price;
+    private String category;
+}
+```
+
+### Field Descriptions
+
+| Field | Type | Description | Constraints |
+|-------|------|-------------|-------------|
+| `id` | `UUID` | Unique identifier | Auto-generated |
+| `name` | `String` | Product name | Required, not blank |
+| `description` | `String` | Detailed description | Optional |
+| `price` | `BigDecimal` | Product price | Required, positive |
+| `category` | `String` | Product category | Optional |
+
+<Info>
+  The model uses **UUID** instead of auto-increment IDs for better distributed system support and database-agnostic design.
+</Info>
+
+## Use Cases
+
+The Products domain exposes two main use cases:
+
+<Tabs>
+  <Tab title="RegisterProductUseCase">
+    **Purpose:** Register a new product in the system
+    
+    ```java RegisterProductUseCase.java
+    package com.fbaron.ims.product.usecase;
+    
+    import com.fbaron.ims.product.model.Product;
+    
+    public interface RegisterProductUseCase {
+        Product register(Product product);
+    }
+    ```
+    
+    **Usage Example:**
+    ```java
+    Product product = Product.builder()
+            .id(UUID.randomUUID())
+            .name("Wireless Mouse")
+            .description("Ergonomic wireless mouse with 6 buttons")
+            .price(new BigDecimal("29.99"))
+            .category("Electronics")
+            .build();
+    
+    Product registered = registerProductUseCase.register(product);
+    ```
+    
+    **Business Rules:**
+    - Product name must not be blank
+    - Price must be provided
+    - ID is auto-generated if not provided
+  </Tab>
+  
+  <Tab title="GetProductUseCase">
+    **Purpose:** Retrieve product information
+    
+    ```java GetProductUseCase.java
+    package com.fbaron.ims.product.usecase;
+    
+    import com.fbaron.ims.product.model.Product;
+    import java.util.List;
+    import java.util.UUID;
+    
+    public interface GetProductUseCase {
+        Product getById(UUID id);
+        List<Product> getAll();
+    }
+    ```
+    
+    **Usage Example:**
+    ```java
+    // Get single product
+    Product product = getProductUseCase.getById(productId);
+    
+    // Get all products
+    List<Product> allProducts = getProductUseCase.getAll();
+    ```
+    
+    **Exceptions:**
+    - Throws `ProductNotFoundException` if product doesn't exist
+  </Tab>
+</Tabs>
+
+## Service Implementation
+
+The `ProductService` implements both use cases:
+
+```java ProductService.java
+package com.fbaron.ims.product.service;
+
+import com.fbaron.ims.product.exception.ProductNotFoundException;
+import com.fbaron.ims.product.model.Product;
+import com.fbaron.ims.product.repository.ProductCommandRepository;
+import com.fbaron.ims.product.repository.ProductQueryRepository;
+import com.fbaron.ims.product.usecase.GetProductUseCase;
+import com.fbaron.ims.product.usecase.RegisterProductUseCase;
+import lombok.RequiredArgsConstructor;
+
+import java.util.List;
+import java.util.UUID;
+
+@RequiredArgsConstructor
+public class ProductService implements RegisterProductUseCase, GetProductUseCase {
+
+    private final ProductQueryRepository productQueryRepository;
+    private final ProductCommandRepository productCommandRepository;
+
+    @Override
+    public Product register(Product product) {
+        return productCommandRepository.save(product);
+    }
+
+    @Override
+    public List<Product> getAll() {
+        return productQueryRepository.findAll();
+    }
+
+    @Override
+    public Product getById(UUID id) {
+        return productQueryRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+    }
+}
+```
+
+<Note>
+  The service is a **plain Java class** with no Spring annotations. It's registered as a bean via `@Bean` configuration in the data module.
+</Note>
+
+## Repository Ports
+
+The domain defines two repository interfaces following CQRS pattern:
+
+<Tabs>
+  <Tab title="ProductCommandRepository">
+    **Handles write operations:**
+    
+    ```java ProductCommandRepository.java
+    package com.fbaron.ims.product.repository;
+    
+    import com.fbaron.ims.product.model.Product;
+    
+    /**
+     * Specialized Port for creating, updating, and deleting data operations.
+     */
+    public interface ProductCommandRepository {
+        Product save(Product product);
+    }
+    ```
+    
+    <Info>
+      Separating commands from queries allows different implementations (e.g., write to primary DB, read from replica).
+    </Info>
+  </Tab>
+  
+  <Tab title="ProductQueryRepository">
+    **Handles read operations:**
+    
+    ```java ProductQueryRepository.java
+    package com.fbaron.ims.product.repository;
+    
+    import com.fbaron.ims.product.model.Product;
+    import java.util.List;
+    import java.util.Optional;
+    import java.util.UUID;
+    
+    /**
+     * Specialized Port for read-only operations.
+     */
+    public interface ProductQueryRepository {
+        List<Product> findAll();
+        Optional<Product> findById(UUID id);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## REST API
+
+The web module exposes products via REST:
+
+### Endpoints
+
+<AccordionGroup>
+  <Accordion title="POST /api/v1/products - Register Product">
+    **Request:**
+    ```json
+    {
+      "name": "Mechanical Keyboard",
+      "description": "Cherry MX Blue switches",
+      "price": 129.99,
+      "category": "Peripherals"
+    }
+    ```
+    
+    **Response (201 Created):**
+    ```json
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Mechanical Keyboard",
+      "description": "Cherry MX Blue switches",
+      "price": 129.99,
+      "category": "Peripherals"
+    }
+    ```
+    
+    **Validation:**
+    - `name` - Required, not blank
+    - `price` - Required, must be positive
+  </Accordion>
+  
+  <Accordion title="GET /api/v1/products - List All Products">
+    **Response (200 OK):**
+    ```json
+    [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Mechanical Keyboard",
+        "description": "Cherry MX Blue switches",
+        "price": 129.99,
+        "category": "Peripherals"
+      },
+      {
+        "id": "660e8400-e29b-41d4-a716-446655440001",
+        "name": "Wireless Mouse",
+        "description": "Ergonomic design",
+        "price": 49.99,
+        "category": "Peripherals"
+      }
+    ]
+    ```
+  </Accordion>
+  
+  <Accordion title="GET /api/v1/products/{productId} - Get Product by ID">
+    **Response (200 OK):**
+    ```json
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Mechanical Keyboard",
+      "description": "Cherry MX Blue switches",
+      "price": 129.99,
+      "category": "Peripherals"
+    }
+    ```
+    
+    **Error Response (404 Not Found):**
+    ```json
+    {
+      "message": "Product not found with ID: 550e8400-e29b-41d4-a716-446655440000",
+      "timestamp": "2026-03-11T10:30:00Z"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Controller Implementation
+
+```java ProductRestAdapter.java
+package com.fbaron.ims.product.rest;
+
+import com.fbaron.ims.product.dto.ProductDto;
+import com.fbaron.ims.product.dto.RegisterProductDto;
+import com.fbaron.ims.product.mapper.ProductDtoMapper;
+import com.fbaron.ims.product.usecase.GetProductUseCase;
+import com.fbaron.ims.product.usecase.RegisterProductUseCase;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.UUID;
+
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/api/v1/products")
+public class ProductRestAdapter {
+
+    private final GetProductUseCase getProductUseCase;
+    private final RegisterProductUseCase registerProductUseCase;
+    private final ProductDtoMapper productDtoMapper;
+
+    @PostMapping
+    public ResponseEntity<ProductDto> registerProduct(
+            @Valid @RequestBody RegisterProductDto dto) {
+        var product = productDtoMapper.toModel(dto);
+        var registeredProduct = registerProductUseCase.register(product);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(productDtoMapper.toDto(registeredProduct));
+    }
+
+    @GetMapping
+    public ResponseEntity<List<ProductDto>> getAll() {
+        var products = getProductUseCase.getAll();
+        return ResponseEntity.ok(productDtoMapper.toDto(products));
+    }
+
+    @GetMapping("/{productId}")
+    public ResponseEntity<ProductDto> getById(@PathVariable("productId") UUID productId) {
+        var product = getProductUseCase.getById(productId);
+        return ResponseEntity.ok(productDtoMapper.toDto(product));
+    }
+}
+```
+
+## Domain Exceptions
+
+```java ProductNotFoundException.java
+package com.fbaron.ims.product.exception;
+
+import java.util.UUID;
+
+public class ProductNotFoundException extends RuntimeException {
+    public ProductNotFoundException(UUID productId) {
+        super("Product not found with ID: " + productId);
+    }
+}
+```
+
+<Warning>
+  This exception is thrown when attempting to retrieve a product that doesn't exist. It's caught by the global exception handler and returned as HTTP 404.
+</Warning>
+
+## Example Workflows
+
+<Steps>
+  <Step title="Register a New Product">
+    ```bash
+    curl -X POST http://localhost:8080/api/v1/products \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "USB-C Cable",
+        "description": "2m braided cable",
+        "price": 15.99,
+        "category": "Accessories"
+      }'
+    ```
+  </Step>
+  
+  <Step title="Retrieve All Products">
+    ```bash
+    curl http://localhost:8080/api/v1/products
+    ```
+  </Step>
+  
+  <Step title="Get Specific Product">
+    ```bash
+    curl http://localhost:8080/api/v1/products/550e8400-e29b-41d4-a716-446655440000
+    ```
+  </Step>
+</Steps>
+
+## Persistence
+
+Products can be stored in any of the four supported databases:
+
+<Tabs>
+  <Tab title="JPA (Relational)">
+    ```sql
+    CREATE TABLE products (
+        id UUID PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        price DECIMAL(10, 2) NOT NULL,
+        category VARCHAR(100)
+    );
+    ```
+  </Tab>
+  
+  <Tab title="MongoDB (Document)">
+    ```json
+    {
+      "_id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Wireless Mouse",
+      "description": "Ergonomic design",
+      "price": 49.99,
+      "category": "Peripherals"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Elasticsearch (Search)">
+    ```json
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Wireless Mouse",
+      "description": "Ergonomic design",
+      "price": 49.99,
+      "category": "Peripherals"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Testing Products
+
+<CodeGroup>
+```java Unit Test
+@ExtendWith(MockitoExtension.class)
+class ProductServiceTest {
+    @Mock
+    private ProductCommandRepository commandRepo;
+    
+    @InjectMocks
+    private ProductService service;
+    
+    @Test
+    void registerSavesProduct() {
+        Product product = Product.builder()
+                .name("Test Product")
+                .build();
+        when(commandRepo.save(product)).thenReturn(product);
+        
+        Product result = service.register(product);
+        
+        assertEquals(product, result);
+        verify(commandRepo).save(product);
+    }
+}
+```
+
+```bash Integration Test
+curl -X POST http://localhost:8080/api/v1/products \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test","price":10.00}'
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Inventory Movements" icon="truck" href="/domain/inventory-movements">
+    Track stock changes for products
+  </Card>
+  <Card title="Adding Features" icon="plus" href="/guides/adding-features">
+    Extend the Products domain
+  </Card>
+  <Card title="Testing Strategies" icon="vial" href="/guides/testing-strategies">
+    Test the Products domain
+  </Card>
+  <Card title="REST API Guide" icon="code" href="/quickstart">
+    See more API examples
+  </Card>
+</CardGroup>

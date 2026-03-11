@@ -1,0 +1,534 @@
+---
+title: Persistence Adapters
+description: Understanding the four persistence adapter implementations
+---
+
+The system supports four different persistence technologies, all implementing the same repository ports from the core module.
+
+## Adapter Overview
+
+<CardGroup cols={2}>
+  <Card title="JPA Adapter" icon="database">
+    Spring Data JPA with Hibernate for relational databases
+  </Card>
+  <Card title="JDBC Adapter" icon="plug">
+    Spring JDBC Template for direct SQL control
+  </Card>
+  <Card title="MongoDB Adapter" icon="leaf">
+    Spring Data MongoDB for document storage
+  </Card>
+  <Card title="Elasticsearch Adapter" icon="magnifying-glass">
+    Spring Data Elasticsearch for search and analytics
+  </Card>
+</CardGroup>
+
+## Selecting an Adapter
+
+Set the `APP_PERSISTENCE_TYPE` environment variable:
+
+<Tabs>
+  <Tab title="JPA (Default)">
+    ```bash
+    # Explicitly set JPA
+    APP_PERSISTENCE_TYPE=jpa ./gradlew :app-main:bootRun
+    
+    # Or omit (JPA is default)
+    ./gradlew :app-main:bootRun
+    ```
+    
+    <Info>
+      JPA is the default adapter when no `APP_PERSISTENCE_TYPE` is specified.
+    </Info>
+  </Tab>
+  
+  <Tab title="JDBC">
+    ```bash
+    APP_PERSISTENCE_TYPE=jdbc ./gradlew :app-main:bootRun
+    ```
+  </Tab>
+  
+  <Tab title="MongoDB">
+    ```bash
+    SPRING_DATA_MONGODB_URI='mongodb://root:my-secret-pw@localhost:27017/inventorydb?authSource=admin' \
+    APP_PERSISTENCE_TYPE=mongo \
+    ./gradlew :app-main:bootRun
+    ```
+  </Tab>
+  
+  <Tab title="Elasticsearch">
+    ```bash
+    ELASTICSEARCH_URIS='http://localhost:9200' \
+    APP_PERSISTENCE_TYPE=elasticsearch \
+    ./gradlew :app-main:bootRun
+    ```
+  </Tab>
+</Tabs>
+
+## JPA Adapter
+
+**Technology:** Spring Data JPA + Hibernate
+
+**Best For:** 
+- Traditional relational databases (PostgreSQL, MySQL, Oracle)
+- Complex object-relational mapping
+- Automatic schema generation during development
+
+### Implementation
+
+```java InventoryMovementJpaAdapter.java
+@Component
+@ConditionalOnProperty(name = "app.persistence.type", havingValue = "jpa", matchIfMissing = true)
+@RequiredArgsConstructor
+public class InventoryMovementJpaAdapter implements
+        InventoryMovementQueryRepository,
+        InventoryMovementCommandRepository {
+
+    private final InventoryMovementJpaRepository jpaRepository;
+    private final InventoryMovementJpaMapper jpaMapper;
+
+    @Override
+    public InventoryMovement save(InventoryMovement inventoryMovement) {
+        var jpaEntity = jpaMapper.toJpaEntity(inventoryMovement);
+        return jpaMapper.toModel(jpaRepository.save(jpaEntity));
+    }
+
+    @Override
+    public Integer findTotalInputs(UUID productId) {
+        return jpaRepository.findTotalInputs(productId);
+    }
+
+    @Override
+    public Integer findTotalOutputs(UUID productId) {
+        return jpaRepository.findTotalOutPuts(productId);
+    }
+}
+```
+
+### JPA Entity Example
+
+```java InventoryMovementJpaEntity.java
+@Entity
+@Table(name = "inventory_movements")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+public class InventoryMovementJpaEntity {
+
+    @Id
+    private UUID id;
+
+    @ManyToOne
+    @JoinColumn(name = "product_id", nullable = false)
+    private ProductJpaEntity product;
+
+    @Column(nullable = false)
+    private Integer quantity;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private MovementType type;
+
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+
+    private String reason;
+}
+```
+
+### Spring Data Repository
+
+```java InventoryMovementJpaRepository.java
+public interface InventoryMovementJpaRepository 
+        extends JpaRepository<InventoryMovementJpaEntity, UUID> {
+
+    @Query("SELECT COALESCE(SUM(im.quantity), 0) " +
+           "FROM InventoryMovementJpaEntity im " +
+           "WHERE im.product.id = :productId AND im.type = 'INBOUND'")
+    Integer findTotalInputs(@Param("productId") UUID productId);
+
+    @Query("SELECT COALESCE(SUM(im.quantity), 0) " +
+           "FROM InventoryMovementJpaEntity im " +
+           "WHERE im.product.id = :productId AND im.type = 'OUTBOUND'")
+    Integer findTotalOutPuts(@Param("productId") UUID productId);
+}
+```
+
+### Configuration
+
+```yaml application.yaml
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    show-sql: ${JPA_SHOW_SQL:true}
+    defer-datasource-initialization: ${JPA_DEFER_DATASOURCE_INIT:true}
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:h2:mem:inventorydb}
+    driver-class-name: ${DATABASE_DRIVER:org.h2.Driver}
+    username: ${DATABASE_USERNAME:sa}
+    password: ${DATABASE_PASSWORD:}
+```
+
+<AccordionGroup>
+  <Accordion title="Pros">
+    - **Automatic mapping** - Entities map to tables automatically
+    - **Lazy loading** - Relationships loaded on demand
+    - **Change tracking** - Hibernate tracks entity modifications
+    - **JPQL queries** - Database-agnostic query language
+    - **Schema generation** - Can auto-create tables in dev
+  </Accordion>
+  
+  <Accordion title="Cons">
+    - **Abstraction overhead** - More layers between code and SQL
+    - **Performance tuning** - N+1 queries can be tricky
+    - **Complexity** - Session management, lazy loading exceptions
+    - **Debugging** - Generated SQL not always obvious
+  </Accordion>
+</AccordionGroup>
+
+## JDBC Adapter
+
+**Technology:** Spring JDBC Template
+
+**Best For:**
+- Performance-critical applications
+- Full control over SQL
+- Simple CRUD operations
+- Avoiding ORM complexity
+
+### Implementation
+
+```java InventoryMovementJdbcAdapter.java
+@Component
+@ConditionalOnProperty(name = "app.persistence.type", havingValue = "jdbc")
+@RequiredArgsConstructor
+public class InventoryMovementJdbcAdapter implements
+        InventoryMovementQueryRepository,
+        InventoryMovementCommandRepository {
+
+    private final InventoryMovementJdbcRepository jdbcRepository;
+    private final InventoryMovementJdbcMapper jdbcMapper;
+
+    @Override
+    public InventoryMovement save(InventoryMovement inventoryMovement) {
+        var jdbcEntity = jdbcMapper.toJdbcEntity(inventoryMovement);
+        var savedJdbcEntity = jdbcRepository.save(jdbcEntity);
+        return jdbcMapper.toModel(savedJdbcEntity, inventoryMovement.getProduct());
+    }
+
+    @Override
+    public Integer findTotalInputs(UUID productId) {
+        return jdbcRepository.findTotalInputs(productId);
+    }
+
+    @Override
+    public Integer findTotalOutputs(UUID productId) {
+        return jdbcRepository.findTotalOutputs(productId);
+    }
+}
+```
+
+### JDBC Entity
+
+```java InventoryMovementJdbcEntity.java
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+public class InventoryMovementJdbcEntity {
+    private UUID id;
+    private UUID productId;  // Note: Just the ID, not the whole Product
+    private Integer quantity;
+    private MovementType type;
+    private LocalDateTime createdAt;
+    private String reason;
+}
+```
+
+<Note>
+  JDBC entities typically store foreign keys instead of full object references, unlike JPA entities.
+</Note>
+
+<AccordionGroup>
+  <Accordion title="Pros">
+    - **Performance** - Direct SQL execution, no ORM overhead
+    - **Control** - Write exact SQL you want
+    - **Simplicity** - No magic, straightforward data access
+    - **Debugging** - SQL is explicit and visible
+  </Accordion>
+  
+  <Accordion title="Cons">
+    - **Boilerplate** - More manual mapping code
+    - **No lazy loading** - Must explicitly fetch relationships
+    - **Database-specific** - SQL may vary between databases
+    - **Manual schema** - No automatic table generation
+  </Accordion>
+</AccordionGroup>
+
+## MongoDB Adapter
+
+**Technology:** Spring Data MongoDB
+
+**Best For:**
+- Document-oriented data models
+- Flexible schemas
+- Horizontal scaling
+- JSON-like data structures
+
+### Implementation
+
+```java InventoryMovementMongoAdapter.java
+@Component
+@ConditionalOnProperty(name = "app.persistence.type", havingValue = "mongo")
+@RequiredArgsConstructor
+public class InventoryMovementMongoAdapter implements
+        InventoryMovementQueryRepository,
+        InventoryMovementCommandRepository {
+
+    private final InventoryMovementMongoRepository mongoRepository;
+    private final InventoryMovementMongoMapper mongoMapper;
+
+    @Override
+    public InventoryMovement save(InventoryMovement inventoryMovement) {
+        var mongoEntity = mongoMapper.toMongoEntity(inventoryMovement);
+        var savedMongoEntity = mongoRepository.save(mongoEntity);
+        return mongoMapper.toModel(savedMongoEntity, inventoryMovement.getProduct());
+    }
+
+    @Override
+    public Integer findTotalInputs(UUID productId) {
+        return mongoRepository.findTotalInputs(productId);
+    }
+
+    @Override
+    public Integer findTotalOutputs(UUID productId) {
+        return mongoRepository.findTotalOutputs(productId);
+    }
+}
+```
+
+### Configuration
+
+```yaml application.yaml
+spring:
+  data:
+    mongodb:
+      uri: ${SPRING_DATA_MONGODB_URI:${MONGO_URI:mongodb://${MONGO_USERNAME:root}:${MONGO_PASSWORD:my-secret-pw}@${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MONGO_DATABASE:inventorydb}?authSource=${MONGO_AUTH_DB:admin}}}
+```
+
+**Environment Variables:**
+```bash
+# Option 1: Full URI
+SPRING_DATA_MONGODB_URI='mongodb://root:password@localhost:27017/inventorydb?authSource=admin'
+
+# Option 2: Individual components
+MONGO_USERNAME=root
+MONGO_PASSWORD=password
+MONGO_HOST=localhost
+MONGO_PORT=27017
+MONGO_DATABASE=inventorydb
+MONGO_AUTH_DB=admin
+```
+
+<AccordionGroup>
+  <Accordion title="Pros">
+    - **Flexible schema** - Documents can have varying structures
+    - **Scalability** - Built for horizontal scaling
+    - **JSON-native** - Natural fit for web APIs
+    - **Rich queries** - Powerful aggregation framework
+  </Accordion>
+  
+  <Accordion title="Cons">
+    - **No transactions** - Limited multi-document transactions
+    - **Data duplication** - Denormalization is common
+    - **Consistency** - Eventual consistency in clusters
+    - **Learning curve** - Different mental model from SQL
+  </Accordion>
+</AccordionGroup>
+
+## Elasticsearch Adapter
+
+**Technology:** Spring Data Elasticsearch
+
+**Best For:**
+- Full-text search
+- Analytics and aggregations
+- Real-time indexing
+- Log and event data
+
+### Implementation
+
+```java InventoryMovementElasticsearchAdapter.java
+@Component
+@ConditionalOnProperty(name = "app.persistence.type", havingValue = "elasticsearch")
+@RequiredArgsConstructor
+public class InventoryMovementElasticsearchAdapter implements
+        InventoryMovementQueryRepository,
+        InventoryMovementCommandRepository {
+
+    private final InventoryMovementElasticsearchRepository repository;
+    private final InventoryMovementElasticsearchMapper mapper;
+
+    @Override
+    public InventoryMovement save(InventoryMovement inventoryMovement) {
+        var entity = mapper.toEntity(inventoryMovement);
+        var savedEntity = repository.save(entity);
+        return mapper.toModel(savedEntity, inventoryMovement.getProduct());
+    }
+
+    @Override
+    public Integer findTotalInputs(UUID productId) {
+        return repository.findTotalInputs(productId);
+    }
+
+    @Override
+    public Integer findTotalOutputs(UUID productId) {
+        return repository.findTotalOutputs(productId);
+    }
+}
+```
+
+### Configuration
+
+```yaml application.yaml
+spring:
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    username: ${ELASTICSEARCH_USERNAME:}
+    password: ${ELASTICSEARCH_PASSWORD:}
+```
+
+**Environment Variables:**
+```bash
+ELASTICSEARCH_URIS='http://localhost:9200'
+ELASTICSEARCH_USERNAME='elastic'
+ELASTICSEARCH_PASSWORD='changeme'
+```
+
+<AccordionGroup>
+  <Accordion title="Pros">
+    - **Search** - Powerful full-text search capabilities
+    - **Analytics** - Complex aggregations and analytics
+    - **Speed** - Fast queries on large datasets
+    - **Scalability** - Distributed architecture
+  </Accordion>
+  
+  <Accordion title="Cons">
+    - **Not a primary database** - Better as secondary store
+    - **Complexity** - Cluster management can be complex
+    - **Resource intensive** - Requires significant memory
+    - **Consistency** - Near real-time indexing, not immediate
+  </Accordion>
+</AccordionGroup>
+
+## Adapter Selection Guide
+
+<Tabs>
+  <Tab title="Use JPA When...">
+    - You have a traditional relational database
+    - You want automatic schema management in development
+    - Your domain has complex object relationships
+    - You prefer database-agnostic code
+    - ORM complexity is acceptable trade-off
+  </Tab>
+  
+  <Tab title="Use JDBC When...">
+    - Performance is critical
+    - You want full control over SQL
+    - Your queries are simple and straightforward
+    - You're comfortable with manual mapping
+    - You want to avoid ORM overhead
+  </Tab>
+  
+  <Tab title="Use MongoDB When...">
+    - Your data model is document-oriented
+    - You need flexible schemas
+    - Horizontal scaling is important
+    - Your data is naturally hierarchical
+    - You're building JSON-based APIs
+  </Tab>
+  
+  <Tab title="Use Elasticsearch When...">
+    - Full-text search is a primary feature
+    - You need complex analytics and aggregations
+    - You're dealing with log or event data
+    - Search speed on large datasets is critical
+    - You have another primary database
+  </Tab>
+</Tabs>
+
+## Adding a New Adapter
+
+<Steps>
+  <Step title="Create Adapter Package">
+    ```
+    data/src/main/java/com/fbaron/ims/inventory/redis/
+    ├── InventoryMovementRedisAdapter.java
+    ├── entity/
+    │   └── InventoryMovementRedisEntity.java
+    ├── mapper/
+    │   └── InventoryMovementRedisMapper.java
+    └── repository/
+        └── InventoryMovementRedisRepository.java
+    ```
+  </Step>
+  
+  <Step title="Implement Port Interfaces">
+    ```java
+    @Component
+    @ConditionalOnProperty(name = "app.persistence.type", havingValue = "redis")
+    @RequiredArgsConstructor
+    public class InventoryMovementRedisAdapter implements
+            InventoryMovementQueryRepository,
+            InventoryMovementCommandRepository {
+        // Implementation
+    }
+    ```
+  </Step>
+  
+  <Step title="Add Dependency">
+    ```groovy data/build.gradle
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    }
+    ```
+  </Step>
+  
+  <Step title="Configure">
+    ```yaml application.yaml
+    spring:
+      redis:
+        host: ${REDIS_HOST:localhost}
+        port: ${REDIS_PORT:6379}
+    ```
+  </Step>
+  
+  <Step title="Activate">
+    ```bash
+    APP_PERSISTENCE_TYPE=redis ./gradlew :app-main:bootRun
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  The core module remains unchanged! That's the power of hexagonal architecture.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Environment Configuration" icon="gear" href="/guides/environment-configuration">
+    Configure databases and connection settings
+  </Card>
+  <Card title="Adding Features" icon="plus" href="/guides/adding-features">
+    Extend the system with new capabilities
+  </Card>
+  <Card title="Testing Strategies" icon="vial" href="/guides/testing-strategies">
+    Test different adapter implementations
+  </Card>
+  <Card title="Ports and Adapters" icon="plug" href="/architecture/ports-and-adapters">
+    Understand the interface contracts
+  </Card>
+</CardGroup>

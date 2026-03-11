@@ -1,0 +1,371 @@
+---
+title: "Inventory Endpoints"
+description: "REST API endpoints for managing inventory movements and stock levels"
+---
+
+## Add Stock (Inbound)
+
+<ParamField path="POST" type="endpoint">
+  /api/v1/inventories/inbound
+</ParamField>
+
+Registers an inbound inventory movement, adding stock to a product. This endpoint validates the product exists, creates an inventory movement record, and increases the available stock.
+
+### Request Body
+
+<ParamField body="productId" type="UUID" required>
+  The unique identifier of the product to add stock to.
+  
+  **Validation:** `@NotNull` - Product id is required
+</ParamField>
+
+<ParamField body="quantity" type="integer" required>
+  The quantity of units to add to stock. Must be a positive integer.
+  
+  **Validation:**
+  - `@NotNull` - Quantity is required
+  - `@Positive` - Quantity must be greater than zero
+</ParamField>
+
+<ParamField body="reason" type="string" required>
+  The reason for the stock addition (e.g., "Purchase order #12345", "Initial stock").
+  
+  **Validation:** `@NotBlank` - Reason is required
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="UUID">
+  Unique identifier of the inventory movement record
+</ResponseField>
+
+<ResponseField name="product" type="Product">
+  The complete product object associated with this movement
+  
+  <Expandable title="Product Structure">
+    <ResponseField name="id" type="UUID">
+      Product identifier
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Product name
+    </ResponseField>
+    <ResponseField name="price" type="BigDecimal">
+      Product price
+    </ResponseField>
+    <ResponseField name="description" type="string">
+      Product description
+    </ResponseField>
+    <ResponseField name="category" type="string">
+      Product category
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="type" type="MovementType">
+  The movement type. For inbound operations, this is always `INBOUND`
+</ResponseField>
+
+<ResponseField name="createdAt" type="LocalDateTime">
+  Timestamp when the movement was recorded (ISO 8601 format)
+</ResponseField>
+
+<ResponseField name="reason" type="string">
+  The reason for the stock movement
+</ResponseField>
+
+### Status Codes
+
+- **201 Created** - Inbound movement successfully registered
+- **400 Bad Request** - Validation error (invalid quantity or missing fields)
+- **404 Not Found** - Product with specified ID does not exist
+- **500 Internal Server Error** - Server error
+
+### Examples
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8080/api/v1/inventories/inbound \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "550e8400-e29b-41d4-a716-446655440000",
+    "quantity": 100,
+    "reason": "Initial stock from supplier"
+  }'
+```
+
+```json Response (201)
+{
+  "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "product": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Laptop Dell XPS 15",
+    "price": 1299.99,
+    "description": "High-performance laptop with 16GB RAM",
+    "category": "Electronics"
+  },
+  "type": "INBOUND",
+  "createdAt": "2026-03-11T10:30:00",
+  "reason": "Initial stock from supplier"
+}
+```
+
+```json Error (404)
+{
+  "timestamp": "2026-03-11T10:30:00",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Product not found with ID: 550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+</CodeGroup>
+
+<Note>
+  Each inbound movement is recorded as a separate transaction. The system calculates the current stock by summing all inbound movements and subtracting outbound movements.
+</Note>
+
+---
+
+## Remove Stock (Outbound)
+
+<ParamField path="POST" type="endpoint">
+  /api/v1/inventories/outbound
+</ParamField>
+
+Registers an outbound inventory movement, removing stock from a product. This endpoint validates sufficient stock is available before creating the movement record.
+
+### Request Body
+
+<ParamField body="productId" type="UUID" required>
+  The unique identifier of the product to remove stock from.
+  
+  **Validation:** `@NotNull` - Product id is required
+</ParamField>
+
+<ParamField body="quantity" type="integer" required>
+  The quantity of units to remove from stock. Must be positive and not exceed available stock.
+  
+  **Validation:**
+  - `@NotNull` - Quantity is required
+  - `@Positive` - Quantity must be greater than zero
+  - Must not exceed current stock balance
+</ParamField>
+
+<ParamField body="reason" type="string" required>
+  The reason for the stock removal (e.g., "Sale #67890", "Damaged goods").
+  
+  **Validation:** `@NotBlank` - Reason is required
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="UUID">
+  Unique identifier of the inventory movement record
+</ResponseField>
+
+<ResponseField name="product" type="Product">
+  The complete product object associated with this movement
+</ResponseField>
+
+<ResponseField name="type" type="MovementType">
+  The movement type. For outbound operations, this is always `OUTBOUND`
+</ResponseField>
+
+<ResponseField name="createdAt" type="LocalDateTime">
+  Timestamp when the movement was recorded (ISO 8601 format)
+</ResponseField>
+
+<ResponseField name="reason" type="string">
+  The reason for the stock movement
+</ResponseField>
+
+### Status Codes
+
+- **201 Created** - Outbound movement successfully registered
+- **400 Bad Request** - Validation error or insufficient stock
+- **404 Not Found** - Product with specified ID does not exist
+- **500 Internal Server Error** - Server error
+
+### Examples
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8080/api/v1/inventories/outbound \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "550e8400-e29b-41d4-a716-446655440000",
+    "quantity": 5,
+    "reason": "Sale order #12345"
+  }'
+```
+
+```json Response (201)
+{
+  "id": "8d0e7780-8536-51ef-a55c-f18g02ga1bf8",
+  "product": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Laptop Dell XPS 15",
+    "price": 1299.99,
+    "description": "High-performance laptop with 16GB RAM",
+    "category": "Electronics"
+  },
+  "type": "OUTBOUND",
+  "createdAt": "2026-03-11T11:45:00",
+  "reason": "Sale order #12345"
+}
+```
+
+```json Error (400 - Insufficient Stock)
+{
+  "timestamp": "2026-03-11T11:45:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Cannot exit 50 units. Current balance is only 20"
+}
+```
+
+</CodeGroup>
+
+<Warning>
+  The system validates that sufficient stock is available before allowing an outbound movement. If the requested quantity exceeds available stock, the operation will fail with an `InsufficientStockException`.
+</Warning>
+
+---
+
+## Get Stock Balance
+
+<ParamField path="GET" type="endpoint">
+  /api/v1/inventories/{productId}
+</ParamField>
+
+Calculates and returns the current stock balance for a specific product. The balance is calculated by summing all inbound movements and subtracting all outbound movements.
+
+### Path Parameters
+
+<ParamField path="productId" type="UUID" required>
+  The unique identifier of the product to check stock for
+</ParamField>
+
+### Response
+
+Returns an integer representing the current stock balance.
+
+<ResponseField name="balance" type="integer">
+  The current stock balance (total inbound - total outbound)
+</ResponseField>
+
+### Status Codes
+
+- **200 OK** - Stock balance calculated successfully
+- **404 Not Found** - Product with specified ID does not exist
+- **500 Internal Server Error** - Server error
+
+### Examples
+
+<CodeGroup>
+
+```bash curl
+curl -X GET http://localhost:8080/api/v1/inventories/550e8400-e29b-41d4-a716-446655440000
+```
+
+```json Response (200)
+95
+```
+
+```json Zero Stock (200)
+0
+```
+
+```json Error (404)
+{
+  "timestamp": "2026-03-11T12:00:00",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Product not found with ID: 550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+</CodeGroup>
+
+<Note>
+  The stock calculation is performed in real-time by querying all inventory movements. For products with no movements, the balance will be 0.
+</Note>
+
+---
+
+## Implementation Reference
+
+The Inventory REST endpoints are implemented in the adapter layer:
+
+```java
+// Source: web/src/main/java/com/fbaron/ims/inventory/rest/InventoryRestAdapter.java
+
+@RestController
+@RequestMapping("/api/v1/inventories")
+public class InventoryRestAdapter {
+
+    private final GetMovementUseCase getMovementUseCase;
+    private final RegisterMovementUseCase registerMovementUseCase;
+    private final InventoryMovementDtoMapper inventoryMovementDtoMapper;
+
+    @PostMapping("/inbound")
+    public ResponseEntity<InventoryMovementDto> addStock(
+        @Valid @RequestBody RegisterInventoryMovementDto dto) {
+        var registeredMovement = registerMovementUseCase.inbound(
+            dto.productId(), dto.quantity(), dto.reason());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(inventoryMovementDtoMapper.toDto(registeredMovement));
+    }
+
+    @PostMapping("/outbound")
+    public ResponseEntity<InventoryMovementDto> removeStock(
+        @Valid @RequestBody RegisterInventoryMovementDto dto) {
+        var registeredMovement = registerMovementUseCase.outbound(
+            dto.productId(), dto.quantity(), dto.reason());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(inventoryMovementDtoMapper.toDto(registeredMovement));
+    }
+
+    @GetMapping("/{productId}")
+    public ResponseEntity<Integer> getStock(
+        @PathVariable("productId") UUID productId) {
+        return ResponseEntity.ok(
+            getMovementUseCase.calculateStock(productId));
+    }
+}
+```
+
+## Business Logic
+
+The inventory movement business logic includes validation and stock checking:
+
+<Tabs>
+  <Tab title="Inbound Validation">
+    - Validates product exists
+    - Validates quantity is positive
+    - Creates INBOUND movement record
+    - Returns created movement with product details
+  </Tab>
+  
+  <Tab title="Outbound Validation">
+    - Validates product exists
+    - Validates quantity is positive
+    - Calculates current stock balance
+    - Validates sufficient stock is available
+    - Creates OUTBOUND movement record if validation passes
+    - Throws `InsufficientStockException` if stock is insufficient
+  </Tab>
+  
+  <Tab title="Stock Calculation">
+    - Validates product exists
+    - Queries all INBOUND movements and sums quantities
+    - Queries all OUTBOUND movements and sums quantities
+    - Returns: `totalInbound - totalOutbound`
+  </Tab>
+</Tabs>
+
+<Note>
+  See [Inventory Use Cases](/api/use-cases/inventory-use-cases) for detailed business logic implementation and [Inventory Movement Model](/api/models/inventory-movement) for domain model structure.
+</Note>

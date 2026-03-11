@@ -1,97 +1,92 @@
 ---
 title: "Introduction"
-description: "Welcome to the new home for your documentation"
+description: "A production-grade Java blueprint for building applications using modular hexagonal architecture with interchangeable persistence adapters"
 ---
 
-## Setting up
+# Modular Hexagonal Inventory System
 
-Get your documentation site up and running in minutes.
+Build scalable, testable, and framework-agnostic Java applications using proven hexagonal architecture patterns.
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get up and running in minutes with our quickstart guide
+  </Card>
+  <Card title="Architecture Overview" icon="diagram-project" href="/architecture/overview">
+    Learn about the modular hexagonal architecture pattern
+  </Card>
+  <Card title="Persistence Adapters" icon="database" href="/guides/persistence-adapters">
+    Swap between JPA, JDBC, MongoDB, and Elasticsearch
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/products">
+    Explore the REST API endpoints and domain models
+  </Card>
+</CardGroup>
+
+## Key Features
+
+This project demonstrates production-grade patterns for building maintainable Java applications:
+
+<CardGroup cols={3}>
+  <Card title="Hexagonal Architecture" icon="hexagon">
+    Strict separation between business logic and infrastructure
+  </Card>
+  <Card title="Framework Agnostic Core" icon="shield-check">
+    Pure Java domain with no Spring dependencies
+  </Card>
+  <Card title="Interchangeable Adapters" icon="plug">
+    Switch persistence layers without touching business logic
+  </Card>
+  <Card title="CQRS Pattern" icon="split">
+    Separate command and query repositories for clarity
+  </Card>
+  <Card title="Multi-Module Design" icon="layer-group">
+    Four strictly decoupled Gradle modules
+  </Card>
+  <Card title="Production Ready" icon="check-double">
+    Spring Boot integration with comprehensive testing
+  </Card>
+</CardGroup>
+
+## Architecture at a Glance
+
+The system is organized into four independent modules:
+
+<Steps>
+  <Step title="Core Module">
+    Contains pure Java business logic, domain models, and port interfaces. Zero framework dependencies.
+  </Step>
+  <Step title="Data Module">
+    Implements repository ports with multiple persistence adapters: JPA, JDBC, MongoDB, and Elasticsearch.
+  </Step>
+  <Step title="Web Module">
+    Provides REST API adapters with Spring Web controllers and DTOs.
+  </Step>
+  <Step title="App-Main Module">
+    Bootstrap module that wires everything together and launches the Spring Boot application.
+  </Step>
+</Steps>
+
+<Card title="Deep Dive into Architecture" icon="book-open" href="/architecture/hexagonal-pattern" horizontal>
+  Learn how hexagonal architecture principles are applied throughout this project
 </Card>
 
-## Make it yours
+## Use Cases
 
-Design a docs site that looks great and empowers your users.
+Perfect for teams building:
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+- Microservices with strict architectural boundaries
+- Applications requiring multiple database technologies
+- Systems where business logic must outlive framework choices
+- Projects prioritizing testability and maintainability
 
-## Create beautiful pages
+## Tech Stack
 
-Everything you need to create world-class documentation.
+- **Java 21** - Modern Java features
+- **Spring Boot 3.5.10** - Application framework
+- **Gradle Multi-Module** - Build system
+- **Lombok & MapStruct** - Code generation
+- **Multiple Persistence Options** - H2, PostgreSQL, MySQL, MongoDB, Elasticsearch
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
+<Card title="Installation Guide" icon="download" href="/installation" horizontal>
+  Set up your development environment and start building
 </Card>

@@ -1,0 +1,695 @@
+---
+title: Adding Features
+description: How to extend the system with new domains, use cases, and adapters
+---
+
+Learn how to add new features to the inventory system while maintaining clean hexagonal architecture.
+
+## Adding a New Domain
+
+Let's add a **Supplier** domain to track product suppliers.
+
+<Steps>
+  <Step title="Create Domain Model (core)">
+    Create the domain model in the core module:
+    
+    ```java core/src/main/java/com/fbaron/ims/supplier/model/Supplier.java
+    package com.fbaron.ims.supplier.model;
+    
+    import lombok.AllArgsConstructor;
+    import lombok.Builder;
+    import lombok.Getter;
+    import lombok.NoArgsConstructor;
+    
+    import java.util.UUID;
+    
+    @Getter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public class Supplier {
+        private UUID id;
+        private String name;
+        private String contactEmail;
+        private String phoneNumber;
+        private String address;
+    }
+    ```
+    
+    <Note>
+      Keep it pure - no framework annotations, just Lombok for boilerplate reduction.
+    </Note>
+  </Step>
+  
+  <Step title="Define Repository Ports (core)">
+    Create command and query repository interfaces:
+    
+    <CodeGroup>
+    ```java SupplierCommandRepository.java
+    package com.fbaron.ims.supplier.repository;
+    
+    import com.fbaron.ims.supplier.model.Supplier;
+    
+    public interface SupplierCommandRepository {
+        Supplier save(Supplier supplier);
+        void deleteById(UUID id);
+    }
+    ```
+    
+    ```java SupplierQueryRepository.java
+    package com.fbaron.ims.supplier.repository;
+    
+    import com.fbaron.ims.supplier.model.Supplier;
+    import java.util.List;
+    import java.util.Optional;
+    import java.util.UUID;
+    
+    public interface SupplierQueryRepository {
+        List<Supplier> findAll();
+        Optional<Supplier> findById(UUID id);
+        Optional<Supplier> findByName(String name);
+    }
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Create Use Case Interfaces (core)">
+    Define what operations the system supports:
+    
+    <CodeGroup>
+    ```java RegisterSupplierUseCase.java
+    package com.fbaron.ims.supplier.usecase;
+    
+    import com.fbaron.ims.supplier.model.Supplier;
+    
+    public interface RegisterSupplierUseCase {
+        Supplier register(Supplier supplier);
+    }
+    ```
+    
+    ```java GetSupplierUseCase.java
+    package com.fbaron.ims.supplier.usecase;
+    
+    import com.fbaron.ims.supplier.model.Supplier;
+    import java.util.List;
+    import java.util.UUID;
+    
+    public interface GetSupplierUseCase {
+        Supplier getById(UUID id);
+        List<Supplier> getAll();
+    }
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Implement Service (core)">
+    Create the service that implements use cases:
+    
+    ```java SupplierService.java
+    package com.fbaron.ims.supplier.service;
+    
+    import com.fbaron.ims.supplier.exception.SupplierNotFoundException;
+    import com.fbaron.ims.supplier.model.Supplier;
+    import com.fbaron.ims.supplier.repository.SupplierCommandRepository;
+    import com.fbaron.ims.supplier.repository.SupplierQueryRepository;
+    import com.fbaron.ims.supplier.usecase.GetSupplierUseCase;
+    import com.fbaron.ims.supplier.usecase.RegisterSupplierUseCase;
+    import lombok.RequiredArgsConstructor;
+    
+    import java.util.List;
+    import java.util.UUID;
+    
+    @RequiredArgsConstructor
+    public class SupplierService implements RegisterSupplierUseCase, GetSupplierUseCase {
+    
+        private final SupplierQueryRepository queryRepository;
+        private final SupplierCommandRepository commandRepository;
+    
+        @Override
+        public Supplier register(Supplier supplier) {
+            // Add business logic here (e.g., validation)
+            return commandRepository.save(supplier);
+        }
+    
+        @Override
+        public Supplier getById(UUID id) {
+            return queryRepository.findById(id)
+                    .orElseThrow(() -> new SupplierNotFoundException(id));
+        }
+    
+        @Override
+        public List<Supplier> getAll() {
+            return queryRepository.findAll();
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Create JPA Adapter (data)">
+    Implement the repository ports using JPA:
+    
+    <CodeGroup>
+    ```java SupplierJpaEntity.java
+    package com.fbaron.ims.supplier.jpa.entity;
+    
+    import jakarta.persistence.*;
+    import lombok.*;
+    import java.util.UUID;
+    
+    @Entity
+    @Table(name = "suppliers")
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public class SupplierJpaEntity {
+        @Id
+        private UUID id;
+        
+        @Column(nullable = false)
+        private String name;
+        
+        private String contactEmail;
+        private String phoneNumber;
+        private String address;
+    }
+    ```
+    
+    ```java SupplierJpaAdapter.java
+    package com.fbaron.ims.supplier.jpa;
+    
+    import com.fbaron.ims.supplier.jpa.mapper.SupplierJpaMapper;
+    import com.fbaron.ims.supplier.jpa.repository.SupplierJpaRepository;
+    import com.fbaron.ims.supplier.model.Supplier;
+    import com.fbaron.ims.supplier.repository.SupplierCommandRepository;
+    import com.fbaron.ims.supplier.repository.SupplierQueryRepository;
+    import lombok.RequiredArgsConstructor;
+    import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+    import org.springframework.stereotype.Component;
+    
+    import java.util.List;
+    import java.util.Optional;
+    import java.util.UUID;
+    
+    @Component
+    @ConditionalOnProperty(name = "app.persistence.type", havingValue = "jpa", matchIfMissing = true)
+    @RequiredArgsConstructor
+    public class SupplierJpaAdapter implements 
+            SupplierCommandRepository, 
+            SupplierQueryRepository {
+    
+        private final SupplierJpaRepository jpaRepository;
+        private final SupplierJpaMapper mapper;
+    
+        @Override
+        public Supplier save(Supplier supplier) {
+            var entity = mapper.toJpaEntity(supplier);
+            return mapper.toModel(jpaRepository.save(entity));
+        }
+    
+        @Override
+        public void deleteById(UUID id) {
+            jpaRepository.deleteById(id);
+        }
+    
+        @Override
+        public List<Supplier> findAll() {
+            return jpaRepository.findAll().stream()
+                    .map(mapper::toModel)
+                    .toList();
+        }
+    
+        @Override
+        public Optional<Supplier> findById(UUID id) {
+            return jpaRepository.findById(id)
+                    .map(mapper::toModel);
+        }
+    
+        @Override
+        public Optional<Supplier> findByName(String name) {
+            return jpaRepository.findByName(name)
+                    .map(mapper::toModel);
+        }
+    }
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Create REST Adapter (web)">
+    Expose the use cases via REST API:
+    
+    <CodeGroup>
+    ```java SupplierDto.java
+    package com.fbaron.ims.supplier.dto;
+    
+    import java.util.UUID;
+    
+    public record SupplierDto(
+        UUID id,
+        String name,
+        String contactEmail,
+        String phoneNumber,
+        String address
+    ) {}
+    ```
+    
+    ```java RegisterSupplierDto.java
+    package com.fbaron.ims.supplier.dto;
+    
+    import jakarta.validation.constraints.Email;
+    import jakarta.validation.constraints.NotBlank;
+    
+    public record RegisterSupplierDto(
+        @NotBlank String name,
+        @Email String contactEmail,
+        String phoneNumber,
+        String address
+    ) {}
+    ```
+    
+    ```java SupplierRestAdapter.java
+    package com.fbaron.ims.supplier.rest;
+    
+    import com.fbaron.ims.supplier.dto.RegisterSupplierDto;
+    import com.fbaron.ims.supplier.dto.SupplierDto;
+    import com.fbaron.ims.supplier.mapper.SupplierDtoMapper;
+    import com.fbaron.ims.supplier.usecase.GetSupplierUseCase;
+    import com.fbaron.ims.supplier.usecase.RegisterSupplierUseCase;
+    import jakarta.validation.Valid;
+    import lombok.RequiredArgsConstructor;
+    import org.springframework.http.HttpStatus;
+    import org.springframework.http.ResponseEntity;
+    import org.springframework.web.bind.annotation.*;
+    
+    import java.util.List;
+    import java.util.UUID;
+    
+    @RestController
+    @RequiredArgsConstructor
+    @RequestMapping("/api/v1/suppliers")
+    public class SupplierRestAdapter {
+    
+        private final GetSupplierUseCase getSupplierUseCase;
+        private final RegisterSupplierUseCase registerSupplierUseCase;
+        private final SupplierDtoMapper mapper;
+    
+        @PostMapping
+        public ResponseEntity<SupplierDto> register(
+                @Valid @RequestBody RegisterSupplierDto dto) {
+            var supplier = mapper.toModel(dto);
+            var registered = registerSupplierUseCase.register(supplier);
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(mapper.toDto(registered));
+        }
+    
+        @GetMapping
+        public ResponseEntity<List<SupplierDto>> getAll() {
+            var suppliers = getSupplierUseCase.getAll();
+            return ResponseEntity.ok(mapper.toDto(suppliers));
+        }
+    
+        @GetMapping("/{id}")
+        public ResponseEntity<SupplierDto> getById(@PathVariable UUID id) {
+            var supplier = getSupplierUseCase.getById(id);
+            return ResponseEntity.ok(mapper.toDto(supplier));
+        }
+    }
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Register Service Bean (data)">
+    Add the service to the configuration:
+    
+    ```java InventoryBeanConfig.java
+    @Configuration
+    public class InventoryBeanConfig {
+    
+        // ... existing beans ...
+    
+        @Bean
+        public SupplierService supplierService(
+                SupplierQueryRepository queryRepository,
+                SupplierCommandRepository commandRepository) {
+            return new SupplierService(queryRepository, commandRepository);
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  Follow the same pattern for all new domains: Model → Ports → Use Cases → Service → Adapters
+</Tip>
+
+## Adding a New Use Case
+
+Let's add a use case to **transfer stock between warehouses**:
+
+<Steps>
+  <Step title="Create Domain Model (if needed)">
+    ```java Warehouse.java
+    package com.fbaron.ims.warehouse.model;
+    
+    @Getter
+    @Builder
+    public class Warehouse {
+        private UUID id;
+        private String name;
+        private String location;
+    }
+    ```
+  </Step>
+  
+  <Step title="Define Use Case Interface">
+    ```java TransferStockUseCase.java
+    package com.fbaron.ims.inventory.usecase;
+    
+    import java.util.UUID;
+    
+    public interface TransferStockUseCase {
+        void transfer(
+            UUID productId,
+            UUID fromWarehouseId,
+            UUID toWarehouseId,
+            Integer quantity,
+            String reason
+        );
+    }
+    ```
+  </Step>
+  
+  <Step title="Implement in Service">
+    ```java InventoryMovementService.java (updated)
+    @RequiredArgsConstructor
+    public class InventoryMovementService implements 
+            RegisterMovementUseCase, 
+            GetMovementUseCase,
+            TransferStockUseCase {  // Add new interface
+    
+        private final ProductQueryRepository productQuery;
+        private final InventoryMovementCommandRepository movementCommand;
+        private final InventoryMovementQueryRepository movementQuery;
+        private final WarehouseQueryRepository warehouseQuery;
+    
+        @Override
+        public void transfer(
+                UUID productId,
+                UUID fromWarehouseId,
+                UUID toWarehouseId,
+                Integer quantity,
+                String reason) {
+            
+            // Validate product exists
+            Product product = productQuery.findById(productId)
+                    .orElseThrow(() -> new ProductNotFoundException(productId));
+            
+            // Validate warehouses exist
+            Warehouse from = warehouseQuery.findById(fromWarehouseId)
+                    .orElseThrow(() -> new WarehouseNotFoundException(fromWarehouseId));
+            Warehouse to = warehouseQuery.findById(toWarehouseId)
+                    .orElseThrow(() -> new WarehouseNotFoundException(toWarehouseId));
+            
+            // Check stock in source warehouse
+            Integer stock = movementQuery.findStockInWarehouse(productId, fromWarehouseId);
+            if (stock < quantity) {
+                throw new InsufficientStockException(
+                    "Insufficient stock in warehouse " + from.getName()
+                );
+            }
+            
+            // Create outbound from source
+            InventoryMovement outbound = InventoryMovement.builder()
+                    .product(product)
+                    .warehouse(from)
+                    .quantity(quantity)
+                    .type(MovementType.OUTBOUND)
+                    .reason("Transfer to " + to.getName() + ": " + reason)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            movementCommand.save(outbound);
+            
+            // Create inbound to destination
+            InventoryMovement inbound = InventoryMovement.builder()
+                    .product(product)
+                    .warehouse(to)
+                    .quantity(quantity)
+                    .type(MovementType.INBOUND)
+                    .reason("Transfer from " + from.getName() + ": " + reason)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            movementCommand.save(inbound);
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Expose via REST">
+    ```java InventoryRestAdapter.java (updated)
+    @RestController
+    @RequestMapping("/api/v1/inventories")
+    public class InventoryRestAdapter {
+    
+        private final TransferStockUseCase transferStockUseCase;
+    
+        @PostMapping("/transfer")
+        public ResponseEntity<Void> transfer(
+                @Valid @RequestBody TransferStockDto dto) {
+            transferStockUseCase.transfer(
+                dto.productId(),
+                dto.fromWarehouseId(),
+                dto.toWarehouseId(),
+                dto.quantity(),
+                dto.reason()
+            );
+            return ResponseEntity.ok().build();
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Adding a New Adapter
+
+Let's add a **Redis** caching adapter:
+
+<Steps>
+  <Step title="Add Dependency">
+    ```groovy data/build.gradle
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    }
+    ```
+  </Step>
+  
+  <Step title="Create Redis Adapter">
+    ```java ProductRedisAdapter.java
+    package com.fbaron.ims.product.redis;
+    
+    @Component
+    @ConditionalOnProperty(name = "app.persistence.type", havingValue = "redis")
+    @RequiredArgsConstructor
+    public class ProductRedisAdapter implements 
+            ProductCommandRepository, 
+            ProductQueryRepository {
+    
+        private final RedisTemplate<String, ProductRedisEntity> redisTemplate;
+        private final ProductRedisMapper mapper;
+    
+        private static final String KEY_PREFIX = "product:";
+    
+        @Override
+        public Product save(Product product) {
+            String key = KEY_PREFIX + product.getId();
+            var entity = mapper.toRedisEntity(product);
+            redisTemplate.opsForValue().set(key, entity);
+            return product;
+        }
+    
+        @Override
+        public Optional<Product> findById(UUID id) {
+            String key = KEY_PREFIX + id;
+            var entity = redisTemplate.opsForValue().get(key);
+            return Optional.ofNullable(entity)
+                    .map(mapper::toModel);
+        }
+    
+        @Override
+        public List<Product> findAll() {
+            Set<String> keys = redisTemplate.keys(KEY_PREFIX + "*");
+            return keys.stream()
+                    .map(key -> redisTemplate.opsForValue().get(key))
+                    .filter(Objects::nonNull)
+                    .map(mapper::toModel)
+                    .toList();
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Configure Redis">
+    ```yaml application.yaml
+    spring:
+      redis:
+        host: ${REDIS_HOST:localhost}
+        port: ${REDIS_PORT:6379}
+        password: ${REDIS_PASSWORD:}
+    ```
+  </Step>
+  
+  <Step title="Activate">
+    ```bash
+    REDIS_HOST=localhost \
+    REDIS_PORT=6379 \
+    APP_PERSISTENCE_TYPE=redis \
+    ./gradlew :app-main:bootRun
+    ```
+  </Step>
+</Steps>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep Core Pure">
+    The core module should never depend on Spring, JPA, or any framework:
+    
+    **Good:**
+    ```java
+    public class ProductService implements RegisterProductUseCase {
+        // Plain Java constructor injection
+        private final ProductCommandRepository repository;
+    }
+    ```
+    
+    **Bad:**
+    ```java
+    @Service  // NO! Framework dependency in core
+    public class ProductService {
+        @Autowired  // NO!
+        private ProductCommandRepository repository;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="One Port, Multiple Adapters">
+    All adapters for a port must be interchangeable:
+    
+    ```mermaid
+    graph TB
+        Port[ProductCommandRepository] 
+        JPA[JPA Adapter] -.implements.-> Port
+        JDBC[JDBC Adapter] -.implements.-> Port
+        Mongo[Mongo Adapter] -.implements.-> Port
+        Redis[Redis Adapter] -.implements.-> Port
+        
+        style Port fill:#FFC107
+    ```
+    
+    They must all implement the **same interface** with the **same behavior**.
+  </Accordion>
+  
+  <Accordion title="Use MapStruct for Mapping">
+    Don't write manual mapping code:
+    
+    ```java ProductDtoMapper.java
+    @Mapper(componentModel = "spring")
+    public interface ProductDtoMapper {
+        ProductDto toDto(Product product);
+        Product toModel(RegisterProductDto dto);
+        List<ProductDto> toDto(List<Product> products);
+    }
+    ```
+    
+    MapStruct generates efficient mapping code at compile time.
+  </Accordion>
+  
+  <Accordion title="Package by Feature">
+    Organize by domain/feature, not by layer:
+    
+    **Good:**
+    ```
+    ├── product/
+    │   ├── model/
+    │   ├── usecase/
+    │   └── service/
+    └── supplier/
+    ```
+    
+    **Bad:**
+    ```
+    ├── models/
+    │   ├── Product.java
+    │   └── Supplier.java
+    └── services/
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Testing New Features
+
+<CodeGroup>
+```java Unit Test (Core)
+@ExtendWith(MockitoExtension.class)
+class SupplierServiceTest {
+    @Mock
+    private SupplierCommandRepository commandRepo;
+    
+    @Mock
+    private SupplierQueryRepository queryRepo;
+    
+    @InjectMocks
+    private SupplierService service;
+    
+    @Test
+    void registerSavesSupplier() {
+        Supplier supplier = Supplier.builder().name("ACME Corp").build();
+        when(commandRepo.save(supplier)).thenReturn(supplier);
+        
+        Supplier result = service.register(supplier);
+        
+        assertEquals(supplier, result);
+        verify(commandRepo).save(supplier);
+    }
+}
+```
+
+```java Integration Test (Web)
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+@ActiveProfiles("test")
+class SupplierRestAdapterTest {
+    @Autowired
+    private TestRestTemplate restTemplate;
+    
+    @Test
+    void registerSupplierReturnsCreated() {
+        var dto = new RegisterSupplierDto("ACME Corp", "info@acme.com", null, null);
+        
+        ResponseEntity<SupplierDto> response = restTemplate.postForEntity(
+            "/api/v1/suppliers",
+            dto,
+            SupplierDto.class
+        );
+        
+        assertEquals(HttpStatus.CREATED, response.getStatusCode());
+        assertNotNull(response.getBody().id());
+    }
+}
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Testing Strategies" icon="vial" href="/guides/testing-strategies">
+    Learn how to test your new features
+  </Card>
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture/overview">
+    Understand the architectural principles
+  </Card>
+  <Card title="Persistence Adapters" icon="database" href="/guides/persistence-adapters">
+    Implement adapters for different technologies
+  </Card>
+  <Card title="Domain Models" icon="cube" href="/domain/products">
+    Study existing domain implementations
+  </Card>
+</CardGroup>
