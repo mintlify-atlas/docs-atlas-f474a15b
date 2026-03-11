@@ -1,0 +1,101 @@
+{
+  "projectType": "framework",
+  "projectName": "Modular Hexagonal Inventory System",
+  "projectDescription": "A production-grade Java blueprint for building applications using modular hexagonal architecture with interchangeable persistence adapters.",
+  "theme": "linden",
+  "primaryColor": "#2563eb",
+  "lightColor": "#3b82f6",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/hexagonal-pattern",
+              "architecture/module-structure",
+              "architecture/ports-and-adapters"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/persistence-adapters",
+              "guides/environment-configuration",
+              "guides/adding-features",
+              "guides/testing-strategies"
+            ]
+          },
+          {
+            "group": "Core Domain",
+            "pages": [
+              "domain/products",
+              "domain/inventory-movements"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "REST Endpoints",
+            "pages": [
+              "api/products",
+              "api/inventory"
+            ]
+          },
+          {
+            "group": "Domain Models",
+            "pages": [
+              "api/models/product",
+              "api/models/inventory-movement"
+            ]
+          },
+          {
+            "group": "Use Cases",
+            "pages": [
+              "api/use-cases/product-use-cases",
+              "api/use-cases/inventory-use-cases"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Modular hexagonal architecture with strict decoupling",
+    "Multiple interchangeable persistence adapters (JPA, JDBC, MongoDB, Elasticsearch)",
+    "Framework-agnostic core domain with pure Java",
+    "CQRS-inspired repository pattern",
+    "Production-ready Spring Boot integration",
+    "Comprehensive testing strategies"
+  ],
+  "publicApiSurface": [
+    "POST /api/v1/products - Register a product",
+    "GET /api/v1/products - List all products",
+    "GET /api/v1/products/{productId} - Get product by ID",
+    "POST /api/v1/inventories/inbound - Add stock (inbound movement)",
+    "POST /api/v1/inventories/outbound - Remove stock (outbound movement)",
+    "GET /api/v1/inventories/{productId} - Get stock balance for product",
+    "RegisterProductUseCase - Core use case for product registration",
+    "GetProductUseCase - Core use case for product retrieval",
+    "RegisterMovementUseCase - Core use case for inventory movements",
+    "GetMovementUseCase - Core use case for movement retrieval",
+    "ProductCommandRepository - Port for product write operations",
+    "ProductQueryRepository - Port for product read operations",
+    "InventoryMovementCommandRepository - Port for inventory write operations",
+    "InventoryMovementQueryRepository - Port for inventory read operations"
+  ]
+}
